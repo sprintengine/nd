@@ -82,6 +82,41 @@ describe("pg-boss runner", () => {
     expect(second).toBeNull();
   });
 
+  it("keeps one schedule per job with a cron, and drops it with the cron", async () => {
+    const nightly = defineJob({
+      name: "nightly-thing",
+      payload: z.object({}),
+      retry: { limit: 0, delaySeconds: 0, backoff: false },
+      cron: "15 3 * * *",
+      run: () => Promise.resolve(),
+    });
+    const schedules = async () =>
+      (
+        await database.pool.query<{ cron: string; timezone: string | null }>(
+          "select cron, timezone from pgboss.schedule where name = 'nightly-thing'",
+        )
+      ).rows;
+
+    const first = runner();
+    await first.start([nightly], context, quiet);
+    await first.stop();
+    const second = runner();
+    await second.start([nightly], context, quiet);
+    await second.stop();
+    expect(await schedules()).toEqual([{ cron: "15 3 * * *", timezone: "UTC" }]);
+
+    const third = runner();
+    const unscheduled = defineJob({
+      name: nightly.name,
+      payload: nightly.payload,
+      retry: nightly.retry,
+      run: () => Promise.resolve(),
+    });
+    await third.start([unscheduled], context, quiet);
+    await third.stop();
+    expect(await schedules()).toEqual([]);
+  });
+
   it("restarts on an installed schema", async () => {
     const again = runner();
     await again.start([record], context, quiet);

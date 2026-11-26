@@ -302,9 +302,9 @@ export interface DeletionRun {
  * before `now`. Each account is handled in its own transaction; a request
  * that something now blocks (for example a payment still owed) is left
  * pending and retried on the next run. Safe to run concurrently and
- * repeatedly. Run it daily.
+ * repeatedly. The `account-deletions` job runs it daily.
  */
-export async function processDueDeletions(db: Db, now: Date): Promise<DeletionRun> {
+export async function processDueDeletions(db: Executor, now: Date): Promise<DeletionRun> {
   const due = await db
     .select({ id: accountDeletions.id })
     .from(accountDeletions)

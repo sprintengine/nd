@@ -1,4 +1,4 @@
-import { type Db, meterValues } from "@nd/db";
+import { type Executor, meterValues } from "@nd/db";
 import { inArray, lt, sql } from "drizzle-orm";
 
 /** Meter values and OCPP messages are kept this many months, then purged. */
@@ -25,9 +25,9 @@ export interface TelemetryPurge {
  * append-only triggers; it measures 24 months from the database's clock and
  * runs as its owner, so the role running this needs EXECUTE on it. Meter
  * values older than 24 months before `now` are deleted in batches. Sessions
- * and accounting rows are kept. Run it daily.
+ * and accounting rows are kept. The `telemetry-retention` job runs it daily.
  */
-export async function purgeExpiredTelemetry(db: Db, now: Date): Promise<TelemetryPurge> {
+export async function purgeExpiredTelemetry(db: Executor, now: Date): Promise<TelemetryPurge> {
   const purged = await db.execute<{ deleted: string | number }>(
     sql`select purge_ocpp_messages() as deleted`,
   );

@@ -30,7 +30,8 @@ export interface PgBossRunnerOptions {
  * Jobs on pg-boss in the API's own Postgres: no Redis and no separate worker.
  * `start` installs or migrates pg-boss's schema, creates one queue per job
  * (policy `stately`, so a singleton key allows one queued, one retrying and
- * one running job) and works each queue one job at a time.
+ * one running job), schedules the jobs that have a `cron`, and works each
+ * queue one job at a time.
  */
 export function createPgBossRunner(options: PgBossRunnerOptions): JobRunner {
   const boss = new PgBoss({
@@ -68,6 +69,9 @@ export function createPgBossRunner(options: PgBossRunnerOptions): JobRunner {
         await boss.createQueue(job.name, { policy: "stately", ...queue });
         // createQueue leaves an existing queue alone; apply changed settings.
         await boss.updateQueue(job.name, queue);
+        // One schedule per job, kept in step with its definition.
+        if (job.cron === undefined) await boss.unschedule(job.name);
+        else await boss.schedule(job.name, job.cron, {}, { tz: "UTC" });
         known.set(job.name, job);
         await boss.work<unknown>(
           job.name,

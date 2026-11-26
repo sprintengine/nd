@@ -1,12 +1,7 @@
-// Entry points for the job runner. Each is a plain async function of the
-// database and the current time (or key ring), safe to run repeatedly and
-// concurrently; schedule them as below.
-//
-// | Step                       | When                                   |
-// | -------------------------- | -------------------------------------- |
-// | `processDueDeletions`      | daily                                  |
-// | `purgeExpiredTelemetry`    | daily                                  |
-// | `rotateTaxEncryptionKeys`  | after a new key is put first; or daily |
+// Scheduled steps as plain functions, safe to run repeatedly and
+// concurrently. The first two run daily as jobs (src/compliance/jobs.ts);
+// rotateTaxEncryptionKeys needs the key ring and is run by hand after a new
+// key is put first (docs/RUNBOOK.md).
 
 export { type DeletionRun, processDueDeletions } from "./accounts/deletion.ts";
 export { purgeExpiredTelemetry, type TelemetryPurge } from "./compliance/retention.ts";

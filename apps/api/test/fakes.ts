@@ -165,6 +165,8 @@ export function memoryJobs() {
     runner,
     sent,
     isStarted: () => started,
+    /** Names of the jobs the runner was started with. */
+    registered: () => [...registry.keys()],
     isStopped: () => stopped,
     /** Forgets queued jobs without running them. */
     clear: () => {

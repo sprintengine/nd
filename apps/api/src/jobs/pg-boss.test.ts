@@ -11,6 +11,8 @@ const boss = vi.hoisted(() => ({
   stop: vi.fn(() => Promise.resolve()),
   createQueue: vi.fn(() => Promise.resolve()),
   updateQueue: vi.fn(() => Promise.resolve()),
+  schedule: vi.fn(() => Promise.resolve()),
+  unschedule: vi.fn(() => Promise.resolve()),
   work: vi.fn<(name: string, options: unknown, handler: unknown) => Promise<string>>(() =>
     Promise.resolve("worker"),
   ),
@@ -28,6 +30,8 @@ vi.mock("pg-boss", () => ({
     stop = boss.stop;
     createQueue = boss.createQueue;
     updateQueue = boss.updateQueue;
+    schedule = boss.schedule;
+    unschedule = boss.unschedule;
     work = boss.work;
     send = boss.send;
     drain = boss.drain;
@@ -48,6 +52,7 @@ const plain = defineJob({
   payload: z.object({}),
   retry: { limit: 0, delaySeconds: 0, backoff: false },
   timeoutSeconds: 30,
+  cron: "0 4 * * *",
   run: () => Promise.resolve(),
 });
 const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -70,6 +75,8 @@ describe("createPgBossRunner", () => {
     const runner = createPgBossRunner({ connectionString: "postgres://localhost/nd" });
     await runner.start([job, plain], "ctx", log);
     expect(boss.start).toHaveBeenCalled();
+    expect(boss.unschedule).toHaveBeenCalledWith("ping");
+    expect(boss.schedule).toHaveBeenCalledWith("plain", "0 4 * * *", {}, { tz: "UTC" });
     expect(boss.createQueue).toHaveBeenCalledWith("ping", {
       policy: "stately",
       retryLimit: 3,

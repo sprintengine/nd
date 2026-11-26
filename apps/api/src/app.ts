@@ -14,6 +14,7 @@ import { type Auth, createAuth } from "./auth/auth.ts";
 import { registerAuthRoutes } from "./auth/routes.ts";
 import { registerSession } from "./auth/session.ts";
 import { BOOKING_JOBS } from "./bookings/jobs.ts";
+import { COMPLIANCE_JOBS } from "./compliance/jobs.ts";
 import type { AppDeps } from "./deps.ts";
 import { HttpProblem, registerProblemHandlers } from "./http/problem.ts";
 import { registerAccountDeletionRoutes } from "./routes/account-deletion.ts";
@@ -158,7 +159,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Jobs run in this process: they start once the app is ready and stop,
   // letting running jobs finish, when it closes.
   app.addHook("onReady", async () => {
-    await deps.jobs.start(BOOKING_JOBS, services, app.log);
+    await deps.jobs.start([...BOOKING_JOBS, ...COMPLIANCE_JOBS], services, app.log);
   });
   app.addHook("onClose", async () => {
     await deps.jobs.stop();

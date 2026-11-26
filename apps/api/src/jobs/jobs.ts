@@ -32,6 +32,11 @@ export interface JobDefinition<S extends z.ZodType = z.ZodType, C = never> {
   readonly retry: RetryPolicy;
   /** Longest one attempt may run before it counts as failed. Default 5 minutes. */
   readonly timeoutSeconds?: number;
+  /**
+   * Also run on this cron schedule (five fields, UTC), with an empty payload.
+   * The runner keeps one schedule per job; dropping the field removes it.
+   */
+  readonly cron?: string;
   /** Does the work. Throw to fail the attempt (and retry, unless it was the last). */
   run(payload: z.output<S>, context: C, attempt: JobAttempt): Promise<void>;
 }
@@ -93,6 +98,9 @@ export function defineJob<S extends z.ZodType, C>(job: JobDefinition<S, C>): Job
   }
   if (!Number.isInteger(delaySeconds) || delaySeconds < 0) {
     throw new RangeError(`${job.name}: retry.delaySeconds must be a non-negative integer`);
+  }
+  if (job.cron !== undefined && job.cron.trim().split(/\s+/).length !== 5) {
+    throw new TypeError(`${job.name}: cron must have five fields (minute hour day month weekday)`);
   }
   if (
     maxDelaySeconds !== undefined &&
