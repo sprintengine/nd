@@ -155,7 +155,7 @@ export const CONTROL_CLIENT_TIMEOUT_MS = 40_000;
  */
 export function createChargerControlClient(options: ChargerControlClientOptions): ChargerControl {
   const doFetch = options.fetch ?? fetch;
-  const baseUrl = options.baseUrl.replace(/\/+$/, "");
+  const baseUrl = trimTrailingSlashes(options.baseUrl);
   const timeoutMs = options.timeoutMs ?? CONTROL_CLIENT_TIMEOUT_MS;
 
   async function send<C extends ChargerControlCommand>(
@@ -208,4 +208,11 @@ export function createChargerControlClient(options: ChargerControlClientOptions)
       (request: ChargerControlRequest<typeof command>) => send(command, request),
     ]),
   ) as unknown as ChargerControl;
+}
+
+/** Removes trailing "/" characters without a regular expression, so input length can't cause backtracking. */
+function trimTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === "/") end -= 1;
+  return url.slice(0, end);
 }

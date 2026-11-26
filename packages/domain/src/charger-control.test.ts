@@ -73,6 +73,15 @@ describe("createChargerControlClient", () => {
     expect(JSON.parse(init?.body as string)).toEqual({ chargeboxId: "cb", idTag: "TAG" });
   });
 
+  it("trims any number of trailing slashes from the base URL", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(() =>
+      Promise.resolve(jsonResponse({ ok: true, response: { status: "Accepted" } })),
+    );
+    const client = createChargerControlClient({ baseUrl: "http://gw///", secret: "x", fetch });
+    await client.remoteStart({ chargeboxId: "cb", idTag: "TAG" });
+    expect(fetch.mock.calls[0]?.[0]).toBe("http://gw/v1/commands/remoteStart");
+  });
+
   it("returns failures as results", async () => {
     const client = createChargerControlClient({
       baseUrl: "http://gw",
