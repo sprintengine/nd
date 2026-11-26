@@ -202,6 +202,18 @@ export const bookings = pgTable(
     vehiclePlate: text("vehicle_plate"),
     /** Delayed remote start inside the host's night-rate window (later feature). */
     scheduledStartAt: timestamptz("scheduled_start_at"),
+    /** When the driver said they had arrived ("I'm here"). */
+    arrivedAt: timestamptz("arrived_at"),
+    /**
+     * How far from the charger the driver's phone placed them on arrival, in
+     * metres, when they shared a position. Recorded, never enforced.
+     */
+    arrivalDistanceM: integer("arrival_distance_m"),
+    /**
+     * When the driver plugged in and asked for a scheduled start. Billing runs
+     * from here, because the driver occupies the slot while charging waits.
+     */
+    pluggedInAt: timestamptz("plugged_in_at"),
     cancelledAt: timestamptz("cancelled_at"),
     cancelledBy: cancelledBy("cancelled_by"),
     cancellationReason: text("cancellation_reason"),
@@ -224,6 +236,7 @@ export const bookings = pgTable(
     check("bookings_quoted_amount_non_negative", sql`${table.quotedAmountCents} >= 0`),
     check("bookings_price_per_hour_non_negative", sql`${table.pricePerHourCents} >= 0`),
     check("bookings_cancellation_fee_non_negative", sql`${table.cancellationFeeCents} >= 0`),
+    check("bookings_arrival_distance_non_negative", sql`${table.arrivalDistanceM} >= 0`),
     check(
       "bookings_scheduled_start_in_slot",
       sql`${table.scheduledStartAt} is null or ${table.scheduledStartAt} <@ ${table.slot}`,

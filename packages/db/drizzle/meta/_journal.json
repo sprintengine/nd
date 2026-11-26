@@ -43,6 +43,13 @@
       "when": 1795710303049,
       "tag": "0005_accounts_compliance",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795712702941,
+      "tag": "0006_session_control",
+      "breakpoints": true
     }
   ]
 }
