@@ -33,6 +33,7 @@ import { registerChargerRoutes } from "./routes/chargers.ts";
 import { registerDeviceRoutes } from "./routes/devices.ts";
 import { registerHostSessionRoutes } from "./routes/host-sessions.ts";
 import { registerHostRoutes } from "./routes/hosts.ts";
+import { registerHostDashboardRoutes } from "./routes/hosts-dashboard.ts";
 import { registerMeRoutes } from "./routes/me.ts";
 import { registerPaymentMethodRoutes } from "./routes/payment-methods.ts";
 import { registerReceiptRoutes } from "./routes/receipts.ts";
@@ -184,6 +185,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerAccountDeletionRoutes(scope, deps);
     registerChargerRoutes(scope, deps);
     registerHostRoutes(scope, deps);
+    registerHostDashboardRoutes(scope, services);
     registerDeviceRoutes(scope, services);
     // Tell connected apps about bookings the booking routes changed.
     scope.addHook("onSend", (request, reply, payload, done) => {
