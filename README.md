@@ -8,6 +8,7 @@ The first supported charger is the myenergi Zappi (v2.1 and GLO), connected over
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Architecture decision records](docs/adr/)
+- [Deploying](docs/DEPLOY.md) and the [runbook](docs/RUNBOOK.md)
 - [Contributing](CONTRIBUTING.md) and [security policy](SECURITY.md)
 
 ## Layout
@@ -21,7 +22,8 @@ packages/
   db/             Drizzle ORM schema, migrations and access for Postgres + PostGIS
   domain/         Booking and session rules, pricing, shared Zod contracts
   ocpp-core/      OCPP 1.6J message types, framing and validation
-docs/             Architecture and decision records
+infra/            Production Compose stack, Caddy config, backups, e2e smoke test
+docs/             Architecture, decision records, deployment and runbook
 ```
 
 A pnpm workspace with Turborepo. Everything is TypeScript, ESM only, strict mode.
