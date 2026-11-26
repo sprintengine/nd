@@ -387,17 +387,18 @@ Onboarding also asks the host to change the charger's default PIN, confirm the c
 REST with Zod-validated bodies, OpenAPI generated from the same schemas, cookie sessions, and a WebSocket at `/ws` for live updates. Authentication is Better Auth inside the API, with the Drizzle adapter on our Postgres: magic link, Sign in with Apple, Google and phone OTP.
 
 ```
-GET    /healthz
+GET    /healthz | /readyz                        liveness; readiness checks Postgres
+GET    /openapi.json                             OpenAPI 3.1, generated from the Zod schemas
 
-POST   /auth/*                                   Better Auth routes
-GET    /me
+GET    /auth/* | POST /auth/*                    Better Auth routes
+GET    /me                                       the user, with phone-verified and host flags
 POST   /me/delete                                GDPR deletion (section 10)
 
 GET    /chargers?lat&lng&radius&from&to          search: online and free in the window
 GET    /chargers/:id                             listing, approximate location until booked
 POST   /hosts                                    become a host; returns a Stripe onboarding link
 POST   /hosts/chargers                           start onboarding: wss URL, ChargeboxID, secret
-GET    /hosts/chargers/:id/onboarding            waits for the first BootNotification
+GET    /hosts/chargers/:id/onboarding?wait=N     long-polls for the first BootNotification
 PATCH  /hosts/chargers/:id                       pricing, availability, instant book, night-rate window
 
 POST   /bookings                                 request or instant-confirm
@@ -410,6 +411,8 @@ POST   /bookings/:id/review | /dispute
 
 POST   /webhooks/stripe
 ```
+
+Errors are `application/problem+json` (RFC 9457) with a stable `code` and the request id. Booking and hosting need a verified phone number (403 otherwise). Hosts see and change only their own chargers; any other charger id is 404. Search and listings are rate limited per client IP, and Better Auth limits its own routes.
 
 Realtime events: `booking:update`, `session:update {status, kwh, kw, elapsed, costSoFar, lastSeenAt}`, `charger:status`. Internal admin views (chargers, sessions, OCPP message log) come later, behind their own role.
 
