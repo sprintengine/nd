@@ -10,6 +10,7 @@ import {
   updatePaymentFrom,
 } from "../data/bookings.ts";
 import type { Services } from "../services.ts";
+import { queueHeldTransferRelease } from "../settlement/release.ts";
 
 // Stripe webhooks: signature checked against the raw body, each event id
 // processed once (recorded in the same transaction as its effects), and
@@ -129,15 +130,27 @@ async function apply(services: Services, event: Stripe.Event): Promise<boolean> 
 /**
  * Processes a verified event once: its id is recorded in the same
  * transaction as its effects, so a redelivery is a no-op and a failure
- * leaves it to be retried.
+ * leaves it to be retried. Once a connected account's payouts are enabled,
+ * the host's held transfers are retried (after the commit, so the job sees
+ * the new status; the settlement sweep catches up if queueing fails).
  */
 export async function handleStripeEvent(
   services: Services,
   event: Stripe.Event,
 ): Promise<WebhookOutcome> {
-  return services.db.transaction(async (tx) => {
+  const outcome = await services.db.transaction(async (tx): Promise<WebhookOutcome> => {
     const scoped = { ...services, db: tx };
     if (!(await recordWebhookEvent(tx, { id: event.id, type: event.type }))) return "duplicate";
     return (await apply(scoped, event)) ? "processed" : "ignored";
   });
+  if (
+    outcome === "processed" &&
+    event.type === "account.updated" &&
+    payoutStatusOf(event.data.object) === "enabled"
+  ) {
+    await queueHeldTransferRelease(services).catch((error: unknown) => {
+      services.log.warn({ eventId: event.id, err: error }, "held transfer release not queued");
+    });
+  }
+  return outcome;
 }

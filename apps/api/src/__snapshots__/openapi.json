@@ -93,10 +93,7 @@
           },
           "currency": {
             "type": "string",
-            "enum": [
-              "EUR",
-              "GBP"
-            ]
+            "enum": ["EUR", "GBP"]
           },
           "lastSeenAt": {
             "anyOf": [
@@ -138,10 +135,7 @@
           },
           "stopReason": {
             "description": "The charger's reason, such as Remote or EVDisconnected",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "failure": {
             "anyOf": [
@@ -164,10 +158,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "code",
-                  "message"
-                ]
+                "required": ["code", "message"]
               },
               {
                 "type": "null"
@@ -234,10 +225,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "path",
-                "message"
-              ]
+              "required": ["path", "message"]
             }
           },
           "reasons": {
@@ -253,21 +241,11 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "code",
-                "message"
-              ]
+              "required": ["code", "message"]
             }
           }
         },
-        "required": [
-          "type",
-          "code",
-          "title",
-          "status",
-          "instance",
-          "requestId"
-        ]
+        "required": ["type", "code", "title", "status", "instance", "requestId"]
       },
       "AccountDeletionScheduledInput": {
         "type": "object",
@@ -279,9 +257,7 @@
             "description": "When the account is anonymised, unless the deletion is undone first"
           }
         },
-        "required": [
-          "deletionDueAt"
-        ]
+        "required": ["deletionDueAt"]
       },
       "BookingInput": {
         "type": "object",
@@ -298,10 +274,7 @@
           },
           "role": {
             "type": "string",
-            "enum": [
-              "driver",
-              "host"
-            ],
+            "enum": ["driver", "host"],
             "description": "How the caller relates to this booking"
           },
           "status": {
@@ -339,29 +312,17 @@
           },
           "currency": {
             "type": "string",
-            "enum": [
-              "EUR",
-              "GBP"
-            ]
+            "enum": ["EUR", "GBP"]
           },
           "kwhCap": {
-            "type": [
-              "number",
-              "null"
-            ]
+            "type": ["number", "null"]
           },
           "vehiclePlate": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "driverFirstName": {
             "description": "Shown to the host only",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "createdAt": {
             "type": "string",
@@ -384,11 +345,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "enum": [
-                  "driver",
-                  "host",
-                  "system"
-                ]
+                "enum": ["driver", "host", "system"]
               },
               {
                 "type": "null"
@@ -396,10 +353,7 @@
             ]
           },
           "cancellationReason": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "feeCents": {
             "type": "integer",
@@ -447,12 +401,7 @@
                     "description": "When a saved card will be authorised"
                   }
                 },
-                "required": [
-                  "status",
-                  "authorisedCents",
-                  "capturedCents",
-                  "authoriseAt"
-                ]
+                "required": ["status", "authorisedCents", "capturedCents", "authoriseAt"]
               },
               {
                 "type": "null"
@@ -464,10 +413,7 @@
             "description": "For the driver, only while the booking is confirmed, arrived or active"
           },
           "address": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "location": {
             "anyOf": [
@@ -481,10 +427,7 @@
                     "type": "number"
                   }
                 },
-                "required": [
-                  "lat",
-                  "lng"
-                ]
+                "required": ["lat", "lng"]
               },
               {
                 "type": "null"
@@ -531,10 +474,7 @@
             "type": "number"
           }
         },
-        "required": [
-          "lat",
-          "lng"
-        ]
+        "required": ["lat", "lng"]
       },
       "ChargerSearchResultInput": {
         "type": "object",
@@ -552,10 +492,7 @@
           },
           "connectorType": {
             "type": "string",
-            "enum": [
-              "tethered",
-              "untethered"
-            ]
+            "enum": ["tethered", "untethered"]
           },
           "maxKw": {
             "type": "number"
@@ -575,25 +512,16 @@
           },
           "currency": {
             "type": "string",
-            "enum": [
-              "EUR",
-              "GBP"
-            ]
+            "enum": ["EUR", "GBP"]
           },
           "kwhCap": {
-            "type": [
-              "number",
-              "null"
-            ]
+            "type": ["number", "null"]
           },
           "instantBook": {
             "type": "boolean"
           },
           "rating": {
-            "type": [
-              "number",
-              "null"
-            ]
+            "type": ["number", "null"]
           },
           "reviewCount": {
             "type": "integer",
@@ -637,29 +565,16 @@
           },
           "currency": {
             "type": "string",
-            "enum": [
-              "EUR",
-              "GBP"
-            ]
+            "enum": ["EUR", "GBP"]
           },
           "kwhCap": {
-            "type": [
-              "number",
-              "null"
-            ]
+            "type": ["number", "null"]
           },
           "instantBook": {
             "type": "boolean"
           }
         },
-        "required": [
-          "start",
-          "end",
-          "pricePerHourCents",
-          "currency",
-          "kwhCap",
-          "instantBook"
-        ]
+        "required": ["start", "end", "pricePerHourCents", "currency", "kwhCap", "instantBook"]
       },
       "ChargerListingInput": {
         "type": "object",
@@ -677,10 +592,7 @@
           },
           "connectorType": {
             "type": "string",
-            "enum": [
-              "tethered",
-              "untethered"
-            ]
+            "enum": ["tethered", "untethered"]
           },
           "maxKw": {
             "type": "number"
@@ -709,10 +621,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "enum": [
-                  "EUR",
-                  "GBP"
-                ]
+                "enum": ["EUR", "GBP"]
               },
               {
                 "type": "null"
@@ -724,10 +633,7 @@
             "description": "Whether any window can be booked without approval"
           },
           "rating": {
-            "type": [
-              "number",
-              "null"
-            ]
+            "type": ["number", "null"]
           },
           "reviewCount": {
             "type": "integer",
@@ -746,10 +652,7 @@
                 "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
               },
               "rating": {
-                "type": [
-                  "number",
-                  "null"
-                ]
+                "type": ["number", "null"]
               },
               "reviewCount": {
                 "type": "integer",
@@ -757,12 +660,7 @@
                 "maximum": 9007199254740991
               }
             },
-            "required": [
-              "firstName",
-              "memberSince",
-              "rating",
-              "reviewCount"
-            ]
+            "required": ["firstName", "memberSince", "rating", "reviewCount"]
           },
           "slots": {
             "type": "array",
@@ -776,10 +674,7 @@
             "description": "True only for a driver with a confirmed, arrived or active booking here"
           },
           "address": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "location": {
             "anyOf": [
@@ -823,12 +718,7 @@
           },
           "payoutStatus": {
             "type": "string",
-            "enum": [
-              "not_started",
-              "pending",
-              "enabled",
-              "restricted"
-            ]
+            "enum": ["not_started", "pending", "enabled", "restricted"]
           },
           "onboardingUrl": {
             "type": "string",
@@ -841,12 +731,7 @@
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
           }
         },
-        "required": [
-          "hostId",
-          "payoutStatus",
-          "onboardingUrl",
-          "onboardingUrlExpiresAt"
-        ]
+        "required": ["hostId", "payoutStatus", "onboardingUrl", "onboardingUrlExpiresAt"]
       },
       "ChargerCredentialsInput": {
         "type": "object",
@@ -869,12 +754,7 @@
             "description": "OCPP password. Shown only in this response; it cannot be retrieved again"
           }
         },
-        "required": [
-          "chargerId",
-          "chargeboxId",
-          "wssUrl",
-          "secret"
-        ]
+        "required": ["chargerId", "chargeboxId", "wssUrl", "secret"]
       },
       "ChargerOnboardingInput": {
         "type": "object",
@@ -886,37 +766,23 @@
           },
           "status": {
             "type": "string",
-            "enum": [
-              "onboarding",
-              "online",
-              "offline",
-              "faulted"
-            ]
+            "enum": ["onboarding", "online", "offline", "faulted"]
           },
           "connected": {
             "type": "boolean",
             "description": "The charger has sent its first BootNotification"
           },
           "firmware": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "firmwareSupported": {
-            "type": [
-              "boolean",
-              "null"
-            ]
+            "type": ["boolean", "null"]
           },
           "maxKw": {
             "type": "number"
           },
           "notice": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         },
         "required": [
@@ -948,11 +814,7 @@
             "description": "Local time of day, HH:MM"
           }
         },
-        "required": [
-          "weekday",
-          "start",
-          "end"
-        ],
+        "required": ["weekday", "start", "end"],
         "description": "A weekly window; one ending at or before its start runs past midnight"
       },
       "HostChargerInput": {
@@ -974,28 +836,17 @@
           },
           "status": {
             "type": "string",
-            "enum": [
-              "onboarding",
-              "online",
-              "offline",
-              "faulted"
-            ]
+            "enum": ["onboarding", "online", "offline", "faulted"]
           },
           "firmware": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "maxKw": {
             "type": "number"
           },
           "connectorType": {
             "type": "string",
-            "enum": [
-              "tethered",
-              "untethered"
-            ]
+            "enum": ["tethered", "untethered"]
           },
           "address": {
             "type": "string"
@@ -1014,10 +865,7 @@
                 "maximum": 180
               }
             },
-            "required": [
-              "lat",
-              "lng"
-            ]
+            "required": ["lat", "lng"]
           },
           "timezone": {
             "type": "string"
@@ -1039,16 +887,10 @@
           },
           "currency": {
             "type": "string",
-            "enum": [
-              "EUR",
-              "GBP"
-            ]
+            "enum": ["EUR", "GBP"]
           },
           "kwhCap": {
-            "type": [
-              "number",
-              "null"
-            ]
+            "type": ["number", "null"]
           },
           "instantBook": {
             "type": "boolean"
@@ -1070,11 +912,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "weekday",
-                "start",
-                "end"
-              ]
+              "required": ["weekday", "start", "end"]
             }
           },
           "maxSessionsPerDay": {
@@ -1094,10 +932,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "start",
-                  "end"
-                ]
+                "required": ["start", "end"]
               },
               {
                 "type": "null"
@@ -1116,10 +951,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "code",
-                "message"
-              ]
+              "required": ["code", "message"]
             },
             "description": "Unmet conditions for publishing"
           }
@@ -1163,16 +995,10 @@
             "type": "boolean"
           },
           "image": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "phoneNumber": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "phoneVerified": {
             "type": "boolean",
@@ -1191,22 +1017,13 @@
                   },
                   "payoutStatus": {
                     "type": "string",
-                    "enum": [
-                      "not_started",
-                      "pending",
-                      "enabled",
-                      "restricted"
-                    ]
+                    "enum": ["not_started", "pending", "enabled", "restricted"]
                   },
                   "payoutsEnabled": {
                     "type": "boolean"
                   }
                 },
-                "required": [
-                  "id",
-                  "payoutStatus",
-                  "payoutsEnabled"
-                ]
+                "required": ["id", "payoutStatus", "payoutsEnabled"]
               },
               {
                 "type": "null"
@@ -1237,10 +1054,7 @@
             "description": "Confirm it with Stripe's SDK in the app; the card never reaches this API"
           }
         },
-        "required": [
-          "setupIntentId",
-          "clientSecret"
-        ]
+        "required": ["setupIntentId", "clientSecret"]
       },
       "SavedCardInput": {
         "type": "object",
@@ -1269,14 +1083,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "id",
-          "brand",
-          "last4",
-          "expMonth",
-          "expYear",
-          "isDefault"
-        ]
+        "required": ["id", "brand", "last4", "expMonth", "expYear", "isDefault"]
       },
       "SavedCardsInput": {
         "type": "object",
@@ -1288,48 +1095,304 @@
             }
           },
           "defaultPaymentMethodId": {
-            "type": [
-              "string",
-              "null"
+            "type": ["string", "null"]
+          }
+        },
+        "required": ["cards", "defaultPaymentMethodId"]
+      },
+      "ReceiptInput": {
+        "type": "object",
+        "properties": {
+          "bookingId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["driver", "host"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "awaiting_host_confirmation", "needs_review", "paid"],
+            "description": "`pending` until reconciled; `awaiting_host_confirmation` when the session was closed without a stop; `needs_review` while support checks it; `paid` once captured"
+          },
+          "sessionStatus": {
+            "type": "string",
+            "enum": [
+              "starting",
+              "charging",
+              "suspended_ev",
+              "suspended_evse",
+              "stopped",
+              "needs_review",
+              "needs_host_confirmation",
+              "reconciled",
+              "failed"
             ]
+          },
+          "currency": {
+            "type": "string",
+            "enum": ["EUR", "GBP"]
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "stoppedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "durationMinutes": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "From session start to stop, rounded up"
+          },
+          "billedMinutes": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Rounded up to the next 5 minutes"
+          },
+          "kwh": {
+            "description": "Energy delivered: the meter delta",
+            "type": ["number", "null"]
+          },
+          "meter": {
+            "type": "object",
+            "properties": {
+              "startKwh": {
+                "type": ["number", "null"]
+              },
+              "stopKwh": {
+                "type": ["number", "null"]
+              }
+            },
+            "required": ["startKwh", "stopKwh"]
+          },
+          "pricePerHourCents": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "quotedAmountCents": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": ["time", "cap", "adjustment", "platform_fee"]
+                },
+                "description": {
+                  "type": "string"
+                },
+                "amountCents": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Negative for a reduction. A platform fee is taken from the host's payout, not added"
+                }
+              },
+              "required": ["kind", "description", "amountCents"]
+            }
+          },
+          "capNote": {
+            "description": "Set when the quote capped the charge",
+            "type": ["string", "null"]
+          },
+          "totalCents": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "What the driver pays: captured once paid, otherwise the amount due"
+          },
+          "platformFeeCents": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "effectiveCentsPerKwh": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The total divided by the energy delivered, for comparison; billing is by time"
+          },
+          "card": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "brand": {
+                    "type": "string"
+                  },
+                  "last4": {
+                    "type": "string"
+                  }
+                },
+                "required": ["brand", "last4"]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The driver's card; driver only"
+          },
+          "hostPayout": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "amountCents": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["pending", "held", "sent", "failed", "reversed"]
+                  },
+                  "holdReason": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "session_needs_review",
+                          "dispute_open",
+                          "tax_details_incomplete",
+                          "payouts_not_enabled"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": ["amountCents", "status", "holdReason"]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The host's transfer; host only, once the payment is captured"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "rating": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "comment": {
+                    "type": ["string", "null"]
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                  }
+                },
+                "required": ["rating", "comment", "createdAt"]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The driver's review of this booking"
+          },
+          "canReview": {
+            "type": "boolean",
+            "description": "The driver can still rate this booking"
           }
         },
         "required": [
-          "cards",
-          "defaultPaymentMethodId"
+          "bookingId",
+          "sessionId",
+          "role",
+          "status",
+          "sessionStatus",
+          "currency",
+          "startedAt",
+          "stoppedAt",
+          "durationMinutes",
+          "billedMinutes",
+          "kwh",
+          "meter",
+          "pricePerHourCents",
+          "quotedAmountCents",
+          "lines",
+          "capNote",
+          "totalCents",
+          "platformFeeCents",
+          "effectiveCentsPerKwh",
+          "card",
+          "hostPayout",
+          "review",
+          "canReview"
         ]
+      },
+      "ReviewInput": {
+        "type": "object",
+        "properties": {
+          "rating": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "comment": {
+            "type": ["string", "null"]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": ["rating", "comment", "createdAt"]
       },
       "TaxDetailsInput": {
         "type": "object",
         "properties": {
           "type": {
             "type": "string",
-            "enum": [
-              "individual",
-              "business"
-            ]
+            "enum": ["individual", "business"]
           },
           "legalName": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "dateOfBirthOnFile": {
             "type": "boolean",
             "description": "Whether a date of birth is stored; it is never returned"
           },
           "companyName": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "companyNumber": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "address": {
             "type": "object",
@@ -1338,45 +1401,26 @@
                 "type": "string"
               },
               "line2": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "type": ["string", "null"]
               },
               "city": {
                 "type": "string"
               },
               "region": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "type": ["string", "null"]
               },
               "postalCode": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "type": ["string", "null"]
               },
               "country": {
                 "type": "string"
               }
             },
-            "required": [
-              "line1",
-              "line2",
-              "city",
-              "region",
-              "postalCode",
-              "country"
-            ]
+            "required": ["line1", "line2", "city", "region", "postalCode", "country"]
           },
           "taxCountry": {
             "type": "string",
-            "enum": [
-              "IE",
-              "GB"
-            ]
+            "enum": ["IE", "GB"]
           },
           "tinMasked": {
             "type": "string",
@@ -1480,10 +1524,7 @@
           },
           "currency": {
             "type": "string",
-            "enum": [
-              "EUR",
-              "GBP"
-            ]
+            "enum": ["EUR", "GBP"]
           },
           "lastSeenAt": {
             "anyOf": [
@@ -1525,10 +1566,7 @@
           },
           "stopReason": {
             "description": "The charger's reason, such as Remote or EVDisconnected",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "failure": {
             "anyOf": [
@@ -1551,10 +1589,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "code",
-                  "message"
-                ],
+                "required": ["code", "message"],
                 "additionalProperties": false
               },
               {
@@ -1623,10 +1658,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "path",
-                "message"
-              ],
+              "required": ["path", "message"],
               "additionalProperties": false
             }
           },
@@ -1643,22 +1675,12 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "code",
-                "message"
-              ],
+              "required": ["code", "message"],
               "additionalProperties": false
             }
           }
         },
-        "required": [
-          "type",
-          "code",
-          "title",
-          "status",
-          "instance",
-          "requestId"
-        ],
+        "required": ["type", "code", "title", "status", "instance", "requestId"],
         "additionalProperties": false
       },
       "AccountDeletionScheduled": {
@@ -1671,9 +1693,7 @@
             "description": "When the account is anonymised, unless the deletion is undone first"
           }
         },
-        "required": [
-          "deletionDueAt"
-        ],
+        "required": ["deletionDueAt"],
         "additionalProperties": false
       },
       "Booking": {
@@ -1691,10 +1711,7 @@
           },
           "role": {
             "type": "string",
-            "enum": [
-              "driver",
-              "host"
-            ],
+            "enum": ["driver", "host"],
             "description": "How the caller relates to this booking"
           },
           "status": {
@@ -1732,29 +1749,17 @@
           },
           "currency": {
             "type": "string",
-            "enum": [
-              "EUR",
-              "GBP"
-            ]
+            "enum": ["EUR", "GBP"]
           },
           "kwhCap": {
-            "type": [
-              "number",
-              "null"
-            ]
+            "type": ["number", "null"]
           },
           "vehiclePlate": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "driverFirstName": {
             "description": "Shown to the host only",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "createdAt": {
             "type": "string",
@@ -1777,11 +1782,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "enum": [
-                  "driver",
-                  "host",
-                  "system"
-                ]
+                "enum": ["driver", "host", "system"]
               },
               {
                 "type": "null"
@@ -1789,10 +1790,7 @@
             ]
           },
           "cancellationReason": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "feeCents": {
             "type": "integer",
@@ -1840,12 +1838,7 @@
                     "description": "When a saved card will be authorised"
                   }
                 },
-                "required": [
-                  "status",
-                  "authorisedCents",
-                  "capturedCents",
-                  "authoriseAt"
-                ],
+                "required": ["status", "authorisedCents", "capturedCents", "authoriseAt"],
                 "additionalProperties": false
               },
               {
@@ -1858,10 +1851,7 @@
             "description": "For the driver, only while the booking is confirmed, arrived or active"
           },
           "address": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "location": {
             "anyOf": [
@@ -1875,10 +1865,7 @@
                     "type": "number"
                   }
                 },
-                "required": [
-                  "lat",
-                  "lng"
-                ],
+                "required": ["lat", "lng"],
                 "additionalProperties": false
               },
               {
@@ -1927,10 +1914,7 @@
             "type": "number"
           }
         },
-        "required": [
-          "lat",
-          "lng"
-        ],
+        "required": ["lat", "lng"],
         "additionalProperties": false
       },
       "ChargerSearchResult": {
@@ -1949,10 +1933,7 @@
           },
           "connectorType": {
             "type": "string",
-            "enum": [
-              "tethered",
-              "untethered"
-            ]
+            "enum": ["tethered", "untethered"]
           },
           "maxKw": {
             "type": "number"
@@ -1972,25 +1953,16 @@
           },
           "currency": {
             "type": "string",
-            "enum": [
-              "EUR",
-              "GBP"
-            ]
+            "enum": ["EUR", "GBP"]
           },
           "kwhCap": {
-            "type": [
-              "number",
-              "null"
-            ]
+            "type": ["number", "null"]
           },
           "instantBook": {
             "type": "boolean"
           },
           "rating": {
-            "type": [
-              "number",
-              "null"
-            ]
+            "type": ["number", "null"]
           },
           "reviewCount": {
             "type": "integer",
@@ -2035,29 +2007,16 @@
           },
           "currency": {
             "type": "string",
-            "enum": [
-              "EUR",
-              "GBP"
-            ]
+            "enum": ["EUR", "GBP"]
           },
           "kwhCap": {
-            "type": [
-              "number",
-              "null"
-            ]
+            "type": ["number", "null"]
           },
           "instantBook": {
             "type": "boolean"
           }
         },
-        "required": [
-          "start",
-          "end",
-          "pricePerHourCents",
-          "currency",
-          "kwhCap",
-          "instantBook"
-        ],
+        "required": ["start", "end", "pricePerHourCents", "currency", "kwhCap", "instantBook"],
         "additionalProperties": false
       },
       "ChargerListing": {
@@ -2076,10 +2035,7 @@
           },
           "connectorType": {
             "type": "string",
-            "enum": [
-              "tethered",
-              "untethered"
-            ]
+            "enum": ["tethered", "untethered"]
           },
           "maxKw": {
             "type": "number"
@@ -2108,10 +2064,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "enum": [
-                  "EUR",
-                  "GBP"
-                ]
+                "enum": ["EUR", "GBP"]
               },
               {
                 "type": "null"
@@ -2123,10 +2076,7 @@
             "description": "Whether any window can be booked without approval"
           },
           "rating": {
-            "type": [
-              "number",
-              "null"
-            ]
+            "type": ["number", "null"]
           },
           "reviewCount": {
             "type": "integer",
@@ -2145,10 +2095,7 @@
                 "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
               },
               "rating": {
-                "type": [
-                  "number",
-                  "null"
-                ]
+                "type": ["number", "null"]
               },
               "reviewCount": {
                 "type": "integer",
@@ -2156,12 +2103,7 @@
                 "maximum": 9007199254740991
               }
             },
-            "required": [
-              "firstName",
-              "memberSince",
-              "rating",
-              "reviewCount"
-            ],
+            "required": ["firstName", "memberSince", "rating", "reviewCount"],
             "additionalProperties": false
           },
           "slots": {
@@ -2176,10 +2118,7 @@
             "description": "True only for a driver with a confirmed, arrived or active booking here"
           },
           "address": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "location": {
             "anyOf": [
@@ -2224,12 +2163,7 @@
           },
           "payoutStatus": {
             "type": "string",
-            "enum": [
-              "not_started",
-              "pending",
-              "enabled",
-              "restricted"
-            ]
+            "enum": ["not_started", "pending", "enabled", "restricted"]
           },
           "onboardingUrl": {
             "type": "string",
@@ -2242,12 +2176,7 @@
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
           }
         },
-        "required": [
-          "hostId",
-          "payoutStatus",
-          "onboardingUrl",
-          "onboardingUrlExpiresAt"
-        ],
+        "required": ["hostId", "payoutStatus", "onboardingUrl", "onboardingUrlExpiresAt"],
         "additionalProperties": false
       },
       "ChargerCredentials": {
@@ -2271,12 +2200,7 @@
             "description": "OCPP password. Shown only in this response; it cannot be retrieved again"
           }
         },
-        "required": [
-          "chargerId",
-          "chargeboxId",
-          "wssUrl",
-          "secret"
-        ],
+        "required": ["chargerId", "chargeboxId", "wssUrl", "secret"],
         "additionalProperties": false
       },
       "ChargerOnboarding": {
@@ -2289,37 +2213,23 @@
           },
           "status": {
             "type": "string",
-            "enum": [
-              "onboarding",
-              "online",
-              "offline",
-              "faulted"
-            ]
+            "enum": ["onboarding", "online", "offline", "faulted"]
           },
           "connected": {
             "type": "boolean",
             "description": "The charger has sent its first BootNotification"
           },
           "firmware": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "firmwareSupported": {
-            "type": [
-              "boolean",
-              "null"
-            ]
+            "type": ["boolean", "null"]
           },
           "maxKw": {
             "type": "number"
           },
           "notice": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         },
         "required": [
@@ -2352,11 +2262,7 @@
             "description": "Local time of day, HH:MM"
           }
         },
-        "required": [
-          "weekday",
-          "start",
-          "end"
-        ],
+        "required": ["weekday", "start", "end"],
         "additionalProperties": false,
         "description": "A weekly window; one ending at or before its start runs past midnight"
       },
@@ -2379,28 +2285,17 @@
           },
           "status": {
             "type": "string",
-            "enum": [
-              "onboarding",
-              "online",
-              "offline",
-              "faulted"
-            ]
+            "enum": ["onboarding", "online", "offline", "faulted"]
           },
           "firmware": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "maxKw": {
             "type": "number"
           },
           "connectorType": {
             "type": "string",
-            "enum": [
-              "tethered",
-              "untethered"
-            ]
+            "enum": ["tethered", "untethered"]
           },
           "address": {
             "type": "string"
@@ -2419,10 +2314,7 @@
                 "maximum": 180
               }
             },
-            "required": [
-              "lat",
-              "lng"
-            ],
+            "required": ["lat", "lng"],
             "additionalProperties": false
           },
           "timezone": {
@@ -2445,16 +2337,10 @@
           },
           "currency": {
             "type": "string",
-            "enum": [
-              "EUR",
-              "GBP"
-            ]
+            "enum": ["EUR", "GBP"]
           },
           "kwhCap": {
-            "type": [
-              "number",
-              "null"
-            ]
+            "type": ["number", "null"]
           },
           "instantBook": {
             "type": "boolean"
@@ -2476,11 +2362,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "weekday",
-                "start",
-                "end"
-              ],
+              "required": ["weekday", "start", "end"],
               "additionalProperties": false
             }
           },
@@ -2501,10 +2383,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "start",
-                  "end"
-                ],
+                "required": ["start", "end"],
                 "additionalProperties": false
               },
               {
@@ -2524,10 +2403,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "code",
-                "message"
-              ],
+              "required": ["code", "message"],
               "additionalProperties": false
             },
             "description": "Unmet conditions for publishing"
@@ -2573,16 +2449,10 @@
             "type": "boolean"
           },
           "image": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "phoneNumber": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "phoneVerified": {
             "type": "boolean",
@@ -2601,22 +2471,13 @@
                   },
                   "payoutStatus": {
                     "type": "string",
-                    "enum": [
-                      "not_started",
-                      "pending",
-                      "enabled",
-                      "restricted"
-                    ]
+                    "enum": ["not_started", "pending", "enabled", "restricted"]
                   },
                   "payoutsEnabled": {
                     "type": "boolean"
                   }
                 },
-                "required": [
-                  "id",
-                  "payoutStatus",
-                  "payoutsEnabled"
-                ],
+                "required": ["id", "payoutStatus", "payoutsEnabled"],
                 "additionalProperties": false
               },
               {
@@ -2649,10 +2510,7 @@
             "description": "Confirm it with Stripe's SDK in the app; the card never reaches this API"
           }
         },
-        "required": [
-          "setupIntentId",
-          "clientSecret"
-        ],
+        "required": ["setupIntentId", "clientSecret"],
         "additionalProperties": false
       },
       "SavedCard": {
@@ -2682,14 +2540,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "id",
-          "brand",
-          "last4",
-          "expMonth",
-          "expYear",
-          "isDefault"
-        ],
+        "required": ["id", "brand", "last4", "expMonth", "expYear", "isDefault"],
         "additionalProperties": false
       },
       "SavedCards": {
@@ -2702,16 +2553,291 @@
             }
           },
           "defaultPaymentMethodId": {
-            "type": [
-              "string",
-              "null"
+            "type": ["string", "null"]
+          }
+        },
+        "required": ["cards", "defaultPaymentMethodId"],
+        "additionalProperties": false
+      },
+      "Receipt": {
+        "type": "object",
+        "properties": {
+          "bookingId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["driver", "host"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "awaiting_host_confirmation", "needs_review", "paid"],
+            "description": "`pending` until reconciled; `awaiting_host_confirmation` when the session was closed without a stop; `needs_review` while support checks it; `paid` once captured"
+          },
+          "sessionStatus": {
+            "type": "string",
+            "enum": [
+              "starting",
+              "charging",
+              "suspended_ev",
+              "suspended_evse",
+              "stopped",
+              "needs_review",
+              "needs_host_confirmation",
+              "reconciled",
+              "failed"
             ]
+          },
+          "currency": {
+            "type": "string",
+            "enum": ["EUR", "GBP"]
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "stoppedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "durationMinutes": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "From session start to stop, rounded up"
+          },
+          "billedMinutes": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Rounded up to the next 5 minutes"
+          },
+          "kwh": {
+            "description": "Energy delivered: the meter delta",
+            "type": ["number", "null"]
+          },
+          "meter": {
+            "type": "object",
+            "properties": {
+              "startKwh": {
+                "type": ["number", "null"]
+              },
+              "stopKwh": {
+                "type": ["number", "null"]
+              }
+            },
+            "required": ["startKwh", "stopKwh"],
+            "additionalProperties": false
+          },
+          "pricePerHourCents": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "quotedAmountCents": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": ["time", "cap", "adjustment", "platform_fee"]
+                },
+                "description": {
+                  "type": "string"
+                },
+                "amountCents": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Negative for a reduction. A platform fee is taken from the host's payout, not added"
+                }
+              },
+              "required": ["kind", "description", "amountCents"],
+              "additionalProperties": false
+            }
+          },
+          "capNote": {
+            "description": "Set when the quote capped the charge",
+            "type": ["string", "null"]
+          },
+          "totalCents": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "What the driver pays: captured once paid, otherwise the amount due"
+          },
+          "platformFeeCents": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "effectiveCentsPerKwh": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The total divided by the energy delivered, for comparison; billing is by time"
+          },
+          "card": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "brand": {
+                    "type": "string"
+                  },
+                  "last4": {
+                    "type": "string"
+                  }
+                },
+                "required": ["brand", "last4"],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The driver's card; driver only"
+          },
+          "hostPayout": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "amountCents": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["pending", "held", "sent", "failed", "reversed"]
+                  },
+                  "holdReason": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "session_needs_review",
+                          "dispute_open",
+                          "tax_details_incomplete",
+                          "payouts_not_enabled"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": ["amountCents", "status", "holdReason"],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The host's transfer; host only, once the payment is captured"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "rating": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "comment": {
+                    "type": ["string", "null"]
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                  }
+                },
+                "required": ["rating", "comment", "createdAt"],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The driver's review of this booking"
+          },
+          "canReview": {
+            "type": "boolean",
+            "description": "The driver can still rate this booking"
           }
         },
         "required": [
-          "cards",
-          "defaultPaymentMethodId"
+          "bookingId",
+          "sessionId",
+          "role",
+          "status",
+          "sessionStatus",
+          "currency",
+          "startedAt",
+          "stoppedAt",
+          "durationMinutes",
+          "billedMinutes",
+          "kwh",
+          "meter",
+          "pricePerHourCents",
+          "quotedAmountCents",
+          "lines",
+          "capNote",
+          "totalCents",
+          "platformFeeCents",
+          "effectiveCentsPerKwh",
+          "card",
+          "hostPayout",
+          "review",
+          "canReview"
         ],
+        "additionalProperties": false
+      },
+      "Review": {
+        "type": "object",
+        "properties": {
+          "rating": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "comment": {
+            "type": ["string", "null"]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": ["rating", "comment", "createdAt"],
         "additionalProperties": false
       },
       "TaxDetails": {
@@ -2719,32 +2845,20 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": [
-              "individual",
-              "business"
-            ]
+            "enum": ["individual", "business"]
           },
           "legalName": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "dateOfBirthOnFile": {
             "type": "boolean",
             "description": "Whether a date of birth is stored; it is never returned"
           },
           "companyName": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "companyNumber": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "address": {
             "type": "object",
@@ -2753,46 +2867,27 @@
                 "type": "string"
               },
               "line2": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "type": ["string", "null"]
               },
               "city": {
                 "type": "string"
               },
               "region": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "type": ["string", "null"]
               },
               "postalCode": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "type": ["string", "null"]
               },
               "country": {
                 "type": "string"
               }
             },
-            "required": [
-              "line1",
-              "line2",
-              "city",
-              "region",
-              "postalCode",
-              "country"
-            ],
+            "required": ["line1", "line2", "city", "region", "postalCode", "country"],
             "additionalProperties": false
           },
           "taxCountry": {
             "type": "string",
-            "enum": [
-              "IE",
-              "GB"
-            ]
+            "enum": ["IE", "GB"]
           },
           "tinMasked": {
             "type": "string",
@@ -2828,9 +2923,7 @@
     "/me": {
       "get": {
         "summary": "The signed-in user",
-        "tags": [
-          "account"
-        ],
+        "tags": ["account"],
         "responses": {
           "200": {
             "description": "Default Response",
@@ -2858,9 +2951,7 @@
     "/me/delete": {
       "post": {
         "summary": "Delete your account",
-        "tags": [
-          "account"
-        ],
+        "tags": ["account"],
         "description": "Schedules the account for deletion in 7 days and signs it out on every device at once. Until then it cannot be signed in to; the emailed link undoes the request (POST /me/delete/cancel). After that, personal data is removed; past bookings and payments are kept without it, for accounting. Refused (409, with reasons) while a booking is not finished or a payment is still owed.",
         "responses": {
           "202": {
@@ -2909,9 +3000,7 @@
     "/me/delete/cancel": {
       "post": {
         "summary": "Undo an account deletion",
-        "tags": [
-          "account"
-        ],
+        "tags": ["account"],
         "description": "Keeps an account scheduled for deletion, using the token from the link in the deletion email. Works until the deletion falls due; then sign in again as usual. Needs no session: the deletion request signed every device out.",
         "requestBody": {
           "required": true,
@@ -2927,9 +3016,7 @@
                     "description": "The token from the undo link in the deletion email"
                   }
                 },
-                "required": [
-                  "token"
-                ]
+                "required": ["token"]
               }
             }
           }
@@ -2964,9 +3051,7 @@
     "/chargers": {
       "get": {
         "summary": "Search bookable chargers near a point for a window",
-        "tags": [
-          "chargers"
-        ],
+        "tags": ["chargers"],
         "description": "Online chargers accepting bookings, with an availability window covering the whole slot and no booking overlapping it, nearest first. Positions are approximate.",
         "parameters": [
           {
@@ -3039,9 +3124,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "results"
-                  ],
+                  "required": ["results"],
                   "additionalProperties": false
                 }
               }
@@ -3073,9 +3156,7 @@
     "/chargers/{id}": {
       "get": {
         "summary": "A charger's listing",
-        "tags": [
-          "chargers"
-        ],
+        "tags": ["chargers"],
         "description": "Listing, host summary, rating and free slots for the next 7 days. The address and exact position are included only for a driver with a confirmed, arrived or active booking at this charger.",
         "parameters": [
           {
@@ -3136,9 +3217,7 @@
     "/hosts": {
       "post": {
         "summary": "Become a host",
-        "tags": [
-          "hosts"
-        ],
+        "tags": ["hosts"],
         "description": "Creates the host profile (once) and a Stripe Express account for payouts, and returns a fresh link to Stripe's onboarding.",
         "requestBody": {
           "required": true,
@@ -3153,10 +3232,7 @@
                         "default": "IE",
                         "description": "Country of the host's payouts account",
                         "type": "string",
-                        "enum": [
-                          "IE",
-                          "GB"
-                        ]
+                        "enum": ["IE", "GB"]
                       }
                     }
                   },
@@ -3225,9 +3301,7 @@
     "/hosts/chargers": {
       "post": {
         "summary": "Start connecting a charger",
-        "tags": [
-          "hosts"
-        ],
+        "tags": ["hosts"],
         "description": "Checks the charger can connect (Zappi v2.1, serial starting with 2, or Zappi GLO) and returns the OCPP URL, ChargeboxID and password to enter in the charger's account. The password is shown once and stored only as an argon2 hash. Asking again for a charger still connecting replaces its password.",
         "requestBody": {
           "required": true,
@@ -3243,17 +3317,11 @@
                   "model": {
                     "default": "zappi",
                     "type": "string",
-                    "enum": [
-                      "zappi",
-                      "zappi_glo"
-                    ]
+                    "enum": ["zappi", "zappi_glo"]
                   },
                   "connectorType": {
                     "type": "string",
-                    "enum": [
-                      "tethered",
-                      "untethered"
-                    ]
+                    "enum": ["tethered", "untethered"]
                   },
                   "maxKw": {
                     "default": 7.4,
@@ -3280,10 +3348,7 @@
                         "maximum": 180
                       }
                     },
-                    "required": [
-                      "lat",
-                      "lng"
-                    ],
+                    "required": ["lat", "lng"],
                     "description": "Exact position; shown to drivers only once booked"
                   },
                   "timezone": {
@@ -3291,12 +3356,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "serial",
-                  "connectorType",
-                  "address",
-                  "location"
-                ]
+                "required": ["serial", "connectorType", "address", "location"]
               }
             }
           }
@@ -3368,9 +3428,7 @@
     "/hosts/chargers/{id}/onboarding": {
       "get": {
         "summary": "Wait for a charger to connect",
-        "tags": [
-          "hosts"
-        ],
+        "tags": ["hosts"],
         "description": "Long-polls until the charger sends its first BootNotification, or `wait` seconds pass (capped by the server), then returns its state. Poll again while `connected` is false.",
         "parameters": [
           {
@@ -3452,9 +3510,7 @@
     "/hosts/chargers/{id}": {
       "patch": {
         "summary": "Set a charger's price, availability and listing",
-        "tags": [
-          "hosts"
-        ],
+        "tags": ["hosts"],
         "description": "Changes only the fields sent. `availability` replaces every window; price, kWh cap and instant book apply to every window. Publishing (`acceptingBookings: true`) needs the charger online on firmware 5.794 or later, payouts enabled and at least one window, otherwise 409 lists what is missing.",
         "requestBody": {
           "required": true,
@@ -3514,10 +3570,7 @@
                             "description": "Local time of day, HH:MM"
                           }
                         },
-                        "required": [
-                          "start",
-                          "end"
-                        ]
+                        "required": ["start", "end"]
                       },
                       {
                         "type": "null"
@@ -3623,9 +3676,7 @@
     "/bookings": {
       "post": {
         "summary": "Book a slot",
-        "tags": [
-          "bookings"
-        ],
+        "tags": ["bookings"],
         "description": "Books a charger for a slot inside one of its availability windows. With instant book the booking is confirmed at once; otherwise it waits for the host. The quote is the slot's minutes at the hourly price, with no fee added. A slot starting within 6 days is authorised on the card now (manual capture); a later one keeps the saved card and is authorised 24 hours before the start. An overlapping slot is 409 and nothing is charged; a declined card is 402.",
         "requestBody": {
           "required": true,
@@ -3661,12 +3712,7 @@
                     "pattern": "^pm_[A-Za-z0-9_]+$"
                   }
                 },
-                "required": [
-                  "chargerId",
-                  "from",
-                  "to",
-                  "vehiclePlate"
-                ]
+                "required": ["chargerId", "from", "to", "vehiclePlate"]
               }
             }
           }
@@ -3776,9 +3822,7 @@
       },
       "get": {
         "summary": "The driver's bookings",
-        "tags": [
-          "bookings"
-        ],
+        "tags": ["bookings"],
         "description": "Latest slot first.",
         "parameters": [
           {
@@ -3817,9 +3861,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "bookings"
-                  ],
+                  "required": ["bookings"],
                   "additionalProperties": false
                 }
               }
@@ -3851,10 +3893,7 @@
     "/hosts/bookings": {
       "get": {
         "summary": "Bookings at the host's chargers",
-        "tags": [
-          "bookings",
-          "hosts"
-        ],
+        "tags": ["bookings", "hosts"],
         "description": "Latest slot first; filter by status and by a window the slot overlaps.",
         "parameters": [
           {
@@ -3915,9 +3954,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "bookings"
-                  ],
+                  "required": ["bookings"],
                   "additionalProperties": false
                 }
               }
@@ -3949,9 +3986,7 @@
     "/bookings/{id}": {
       "get": {
         "summary": "A booking",
-        "tags": [
-          "bookings"
-        ],
+        "tags": ["bookings"],
         "description": "For its driver or the host of its charger; anyone else gets 404. The driver sees the address and exact position only while the booking is confirmed, arrived or active.",
         "parameters": [
           {
@@ -4012,10 +4047,7 @@
     "/bookings/{id}/approve": {
       "post": {
         "summary": "Approve a booking request",
-        "tags": [
-          "bookings",
-          "hosts"
-        ],
+        "tags": ["bookings", "hosts"],
         "description": "The host of the charger confirms a requested booking; its idTag is issued. 409 if the slot has been taken since.",
         "parameters": [
           {
@@ -4096,10 +4128,7 @@
     "/bookings/{id}/decline": {
       "post": {
         "summary": "Decline a booking request",
-        "tags": [
-          "bookings",
-          "hosts"
-        ],
+        "tags": ["bookings", "hosts"],
         "description": "The host turns a request down; the card authorisation is released.",
         "requestBody": {
           "required": true,
@@ -4214,9 +4243,7 @@
     "/bookings/{id}/cancel": {
       "post": {
         "summary": "Cancel a booking",
-        "tags": [
-          "bookings"
-        ],
+        "tags": ["bookings"],
         "description": "The driver or the host cancels a requested or confirmed booking. A driver cancelling a confirmed booking after the host's cutoff (default 2 hours before the start) pays one hour at the hourly price, capped at the quote; otherwise the authorisation is released. Once the driver has arrived a booking can only be stopped (409).",
         "requestBody": {
           "required": true,
@@ -4321,9 +4348,7 @@
     "/bookings/{id}/arrive": {
       "post": {
         "summary": "Check in at the charger",
-        "tags": [
-          "sessions"
-        ],
+        "tags": ["sessions"],
         "description": "The driver says they have arrived, from 15 minutes before the slot starts until it ends: a confirmed booking becomes arrived and the window-end stop is scheduled. A position (lat and lng), when sent, is compared with the charger's; the distance is recorded but never refused. Checking in again changes nothing.",
         "requestBody": {
           "required": true,
@@ -4407,24 +4432,14 @@
                         },
                         "nearCharger": {
                           "description": "Within 300 m of the charger; recorded, never enforced",
-                          "type": [
-                            "boolean",
-                            "null"
-                          ]
+                          "type": ["boolean", "null"]
                         }
                       },
-                      "required": [
-                        "arrivedAt",
-                        "distanceM",
-                        "nearCharger"
-                      ],
+                      "required": ["arrivedAt", "distanceM", "nearCharger"],
                       "additionalProperties": false
                     }
                   },
-                  "required": [
-                    "booking",
-                    "arrival"
-                  ],
+                  "required": ["booking", "arrival"],
                   "additionalProperties": false
                 }
               }
@@ -4486,9 +4501,7 @@
     "/bookings/{id}/start": {
       "post": {
         "summary": "Start charging",
-        "tags": [
-          "sessions"
-        ],
+        "tags": ["sessions"],
         "description": "The driver of an arrived booking starts charging: the charger is sent a remote start with the booking's idTag. The answer is the session: `starting` until the charger reports StartTransaction (then `charging`, pushed as `session:update`), or `failed` with a reason and copy to show, after which starting again retries. A charger that refuses because a stale transaction is open is soft-reset and the start retried once. With `startAt` in the future the session is `scheduled` and the remote start is sent then. Starting while a start is pending or a session runs returns it unchanged.",
         "requestBody": {
           "required": true,
@@ -4604,9 +4617,7 @@
     "/bookings/{id}/stop": {
       "post": {
         "summary": "Stop charging",
-        "tags": [
-          "sessions"
-        ],
+        "tags": ["sessions"],
         "description": "The driver stops charging: a running session is sent a remote stop and stays `charging` until the charger reports StopTransaction, when it becomes `stopped` and the booking `completed`. A start not yet begun is abandoned and a scheduled start cancelled. Stopping again, or with nothing running, returns the session unchanged. 503 when the charger does not answer (unplugging the cable also stops it).",
         "parameters": [
           {
@@ -4697,9 +4708,7 @@
     "/bookings/{id}/session": {
       "get": {
         "summary": "The booking's live session",
-        "tags": [
-          "sessions"
-        ],
+        "tags": ["sessions"],
         "description": "Status, energy, power, time and cost so far (rounded up to 5 minutes at the hourly price, capped at the quote) and when the charger last reported, for the booking's driver or host. The same shape is pushed over /ws as `session:update`.",
         "parameters": [
           {
@@ -4760,9 +4769,7 @@
     "/me/payment-methods/setup-intent": {
       "post": {
         "summary": "Start saving a card",
-        "tags": [
-          "payments"
-        ],
+        "tags": ["payments"],
         "description": "Creates the driver's Stripe customer on first use and a SetupIntent for an off-session card. The first card saved becomes the default.",
         "responses": {
           "200": {
@@ -4801,9 +4808,7 @@
     "/me/payment-methods": {
       "get": {
         "summary": "The driver's saved cards",
-        "tags": [
-          "payments"
-        ],
+        "tags": ["payments"],
         "description": "Brand, last four digits and expiry only.",
         "responses": {
           "200": {
@@ -4842,9 +4847,7 @@
     "/me/payment-methods/default": {
       "post": {
         "summary": "Choose the default card",
-        "tags": [
-          "payments"
-        ],
+        "tags": ["payments"],
         "description": "The card bookings use when they do not name one.",
         "requestBody": {
           "required": true,
@@ -4858,9 +4861,7 @@
                     "pattern": "^pm_[A-Za-z0-9_]+$"
                   }
                 },
-                "required": [
-                  "paymentMethodId"
-                ]
+                "required": ["paymentMethodId"]
               }
             }
           }
@@ -4922,9 +4923,7 @@
     "/hosts/me/tax-details": {
       "get": {
         "summary": "Your tax details",
-        "tags": [
-          "hosts"
-        ],
+        "tags": ["hosts"],
         "description": "The tax details platform reporting needs. The TIN is masked to its last three characters and the date of birth is never returned.",
         "responses": {
           "200": {
@@ -4971,9 +4970,7 @@
       },
       "put": {
         "summary": "Set your tax details",
-        "tags": [
-          "hosts"
-        ],
+        "tags": ["hosts"],
         "description": "Stores the legal identity and tax identification number that EU (DAC7) and UK platform reporting need before a host's first payout, marks the host's tax details complete and releases transfers held only for them. The TIN is checked against its country's format (a PPSN with its check letter for Ireland; a 10-digit UTR or a National Insurance number for the UK). The TIN and date of birth are encrypted at rest. Replaces any earlier details.",
         "requestBody": {
           "required": true,
@@ -4986,9 +4983,7 @@
                     "properties": {
                       "type": {
                         "type": "string",
-                        "enum": [
-                          "individual"
-                        ]
+                        "enum": ["individual"]
                       },
                       "legalName": {
                         "type": "string",
@@ -5058,19 +5053,12 @@
                             "pattern": "^[A-Z]{2}$"
                           }
                         },
-                        "required": [
-                          "line1",
-                          "city",
-                          "country"
-                        ],
+                        "required": ["line1", "city", "country"],
                         "description": "Primary address"
                       },
                       "taxCountry": {
                         "type": "string",
-                        "enum": [
-                          "IE",
-                          "GB"
-                        ],
+                        "enum": ["IE", "GB"],
                         "description": "Country of tax residence"
                       },
                       "tin": {
@@ -5080,23 +5068,14 @@
                         "description": "Tax identification number: a PPSN or tax reference for Ireland, a UTR or National Insurance number for the UK"
                       }
                     },
-                    "required": [
-                      "type",
-                      "legalName",
-                      "dateOfBirth",
-                      "address",
-                      "taxCountry",
-                      "tin"
-                    ]
+                    "required": ["type", "legalName", "dateOfBirth", "address", "taxCountry", "tin"]
                   },
                   {
                     "type": "object",
                     "properties": {
                       "type": {
                         "type": "string",
-                        "enum": [
-                          "business"
-                        ]
+                        "enum": ["business"]
                       },
                       "companyName": {
                         "type": "string",
@@ -5166,19 +5145,12 @@
                             "pattern": "^[A-Z]{2}$"
                           }
                         },
-                        "required": [
-                          "line1",
-                          "city",
-                          "country"
-                        ],
+                        "required": ["line1", "city", "country"],
                         "description": "Primary address"
                       },
                       "taxCountry": {
                         "type": "string",
-                        "enum": [
-                          "IE",
-                          "GB"
-                        ],
+                        "enum": ["IE", "GB"],
                         "description": "Country of tax residence"
                       },
                       "tin": {
@@ -5256,12 +5228,517 @@
         }
       }
     },
+    "/bookings/{id}/receipt": {
+      "get": {
+        "summary": "A booking's receipt",
+        "tags": ["bookings"],
+        "description": "For the driver or the host, once the session has stopped (409 before). Billing is by time: the minutes from session start to stop, rounded up to 5, at the hourly price and capped at the quote. Shows the energy delivered (meter start to stop), the effective price per kWh for comparison, the driver's card (driver only) and the host's payout (host only).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bookings/{id}/review": {
+      "post": {
+        "summary": "Rate the host",
+        "tags": ["bookings"],
+        "description": "The driver rates a completed booking from 1 to 5, with an optional comment, once. The host's listing shows the average.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "rating": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5
+                  },
+                  "comment": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  }
+                },
+                "required": ["rating"]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Review"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hosts/sessions/{id}/confirm": {
+      "post": {
+        "summary": "Confirm a session closed without a stop",
+        "tags": ["hosts"],
+        "description": "When the charger never reported the end of a session, it is closed from the last meter value and waits for the host. Confirming bills the driver now; otherwise they are billed 72 hours after it was closed. 409 unless the session is waiting for the caller's confirmation.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "confirmed": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["sessionId", "confirmed"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hosts/sessions/{id}/dispute": {
+      "post": {
+        "summary": "Dispute a session closed without a stop",
+        "tags": ["hosts"],
+        "description": "Instead of confirming, the host disputes the recorded session. Nothing is charged or paid out until support resolves it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "details": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  }
+                },
+                "required": ["reason"]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "disputeId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  },
+                  "required": ["sessionId", "disputeId"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/sessions/{id}/resolve": {
+      "post": {
+        "summary": "Resolve a session that needs review",
+        "tags": ["admin"],
+        "description": "Support decides what the driver pays for a session in review (meter mismatch, missing stop, dispute): the amount is captured, open disputes on the booking are resolved, and the host's transfer is sent or held. Admins only (ADMIN_USER_IDS).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "amountCents": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "What the driver pays; at most what was authorised. 0 releases the authorisation"
+                  },
+                  "note": {
+                    "description": "Recorded on any open dispute",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  }
+                },
+                "required": ["amountCents"]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "amountCents": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["sessionId", "amountCents"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/webhooks/stripe": {
       "post": {
         "summary": "Stripe webhook events",
-        "tags": [
-          "webhooks"
-        ],
+        "tags": ["webhooks"],
         "description": "Verified against the Stripe-Signature header and processed once per event id; a redelivered event is acknowledged without repeating its effects.",
         "responses": {
           "200": {
@@ -5273,23 +5750,14 @@
                   "properties": {
                     "received": {
                       "type": "boolean",
-                      "enum": [
-                        true
-                      ]
+                      "enum": [true]
                     },
                     "outcome": {
                       "type": "string",
-                      "enum": [
-                        "processed",
-                        "duplicate",
-                        "ignored"
-                      ]
+                      "enum": ["processed", "duplicate", "ignored"]
                     }
                   },
-                  "required": [
-                    "received",
-                    "outcome"
-                  ],
+                  "required": ["received", "outcome"],
                   "additionalProperties": false
                 }
               }

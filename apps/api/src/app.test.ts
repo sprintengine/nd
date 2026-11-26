@@ -111,12 +111,15 @@ describe("OpenAPI", () => {
     const spec = response.json<{ openapi: string; paths: Record<string, unknown> }>();
     expect(spec.openapi).toBe("3.1.0");
     expect(Object.keys(spec.paths).sort()).toEqual([
+      "/admin/sessions/{id}/resolve",
       "/bookings",
       "/bookings/{id}",
       "/bookings/{id}/approve",
       "/bookings/{id}/arrive",
       "/bookings/{id}/cancel",
       "/bookings/{id}/decline",
+      "/bookings/{id}/receipt",
+      "/bookings/{id}/review",
       "/bookings/{id}/session",
       "/bookings/{id}/start",
       "/bookings/{id}/stop",
@@ -128,6 +131,8 @@ describe("OpenAPI", () => {
       "/hosts/chargers/{id}",
       "/hosts/chargers/{id}/onboarding",
       "/hosts/me/tax-details",
+      "/hosts/sessions/{id}/confirm",
+      "/hosts/sessions/{id}/dispute",
       "/me",
       "/me/delete",
       "/me/delete/cancel",

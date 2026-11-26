@@ -238,4 +238,12 @@ describe("configFromEnv", () => {
     expect(config).toMatchObject({ stripeWebhookSecret: "whsec_example", platformFeeBps: 250 });
     expect(apiEnvSchema.safeParse({ ...required, PLATFORM_FEE_BPS: "10001" }).success).toBe(false);
   });
+
+  it("reads the admin allowlist, which is empty by default", () => {
+    expect(configFromEnv(apiEnvSchema.parse(required)).adminUserIds).toEqual([]);
+    expect(
+      configFromEnv(apiEnvSchema.parse({ ...required, ADMIN_USER_IDS: " user-a, ,user-b " }))
+        .adminUserIds,
+    ).toEqual(["user-a", "user-b"]);
+  });
 });

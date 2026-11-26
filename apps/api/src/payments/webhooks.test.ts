@@ -4,7 +4,7 @@ import Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BOOKING_ID, bookingDetail, payment, PAYMENT_ID } from "../../test/booking-detail.ts";
-import type { fakePayments } from "../../test/fakes.ts";
+import type { fakePayments, memoryJobs } from "../../test/fakes.ts";
 import { startUnitApp } from "../../test/unit-app.ts";
 import * as data from "../data/bookings.ts";
 import { payoutStatusOf } from "./webhooks.ts";
@@ -14,6 +14,7 @@ vi.mock("../data/bookings.ts");
 const SECRET = "whsec_test_secret";
 let app: FastifyInstance;
 let payments: ReturnType<typeof fakePayments>;
+let jobs: ReturnType<typeof memoryJobs>;
 
 function post(event: object, secret = SECRET) {
   const payload = JSON.stringify(event);
@@ -36,7 +37,7 @@ const event = (type: string, object: object) => ({
 });
 
 beforeEach(() => {
-  ({ app, payments } = startUnitApp());
+  ({ app, payments, jobs } = startUnitApp());
   // The unit app's database never connects; run "transactions" inline.
   vi.spyOn(app.auth.api, "getSession");
   vi.mocked(data.recordWebhookEvent).mockResolvedValue(true);
@@ -129,6 +130,21 @@ describe("POST /webhooks/stripe", () => {
       "acct_1",
       "enabled",
     );
+    expect(jobs.sent).toEqual([
+      { name: "release-held-transfers", payload: {}, options: { singletonKey: "all-hosts" } },
+    ]);
+  });
+
+  it("does not retry held transfers while payouts stay off, and survives a queue failure", async () => {
+    vi.mocked(data.setPayoutStatusByAccount).mockResolvedValue(true);
+    await post(event("account.updated", { id: "acct_1", payouts_enabled: false }));
+    expect(jobs.sent).toEqual([]);
+    vi.spyOn(jobs.runner, "send").mockRejectedValueOnce(new Error("queue down"));
+    const response = await post({
+      ...event("account.updated", { id: "acct_1", payouts_enabled: true, charges_enabled: true }),
+      id: "evt_again",
+    });
+    expect(response.json()).toEqual({ received: true, outcome: "processed" });
   });
 
   it.each([

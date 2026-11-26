@@ -139,6 +139,16 @@ export const apiEnvSchema = z
     GATEWAY_INTERNAL_URL: z.url({ protocol: /^https?$/ }).default("http://localhost:9100"),
     /** Bearer secret for ChargerControl, shared with the gateway. At least 32 characters. */
     GATEWAY_INTERNAL_SECRET: z.string().min(32),
+    /** Comma-separated user ids allowed to use the /admin routes (support staff). */
+    ADMIN_USER_IDS: z
+      .string()
+      .default("")
+      .transform((value) =>
+        value
+          .split(",")
+          .map((item) => item.trim())
+          .filter((item) => item !== ""),
+      ),
     /** Longest the onboarding long-poll waits for the charger to connect, in seconds. */
     ONBOARDING_WAIT_MAX_SECONDS: z.coerce.number().int().min(1).max(120).default(25),
   })
@@ -246,6 +256,8 @@ export interface ApiConfig {
   readonly platformFeeBps: number;
   /** Keys for hosts' tax details; without them saving tax details answers 503. */
   readonly taxKeys: TaxKeyring | undefined;
+  /** Users allowed to use the /admin routes. */
+  readonly adminUserIds: readonly string[];
 }
 
 /** Turns the parsed environment into application settings. */
@@ -278,5 +290,6 @@ export function configFromEnv(env: ApiEnv): ApiConfig {
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
     platformFeeBps: env.PLATFORM_FEE_BPS,
     taxKeys: env.TAX_ENCRYPTION_KEYS,
+    adminUserIds: env.ADMIN_USER_IDS,
   };
 }

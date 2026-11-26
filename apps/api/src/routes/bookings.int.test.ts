@@ -196,6 +196,7 @@ beforeAll(async () => {
     jobs: h.jobs,
     platformFeeBps: 0,
     log: { info: () => undefined, warn: () => undefined, error: () => undefined },
+    email: h.mail.email,
   };
 });
 

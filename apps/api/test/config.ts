@@ -24,6 +24,7 @@ export function testConfig(overrides: Partial<ApiConfig> = {}): ApiConfig {
     stripeWebhookSecret: "whsec_test_secret",
     platformFeeBps: 0,
     taxKeys: parseTaxKeyring(TEST_TAX_KEYS),
+    adminUserIds: [],
     ...overrides,
   };
 }

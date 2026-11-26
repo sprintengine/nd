@@ -22,17 +22,22 @@ import { changedBooking, createRealtimeFeed } from "./realtime/feed.ts";
 import { createRealtimeHub, DEFAULT_HUB_OPTIONS } from "./realtime/hub.ts";
 import { MAX_CLIENT_FRAME_BYTES, registerRealtimeRoute } from "./realtime/ws.ts";
 import { registerAccountDeletionRoutes } from "./routes/account-deletion.ts";
+import { registerAdminRoutes } from "./routes/admin.ts";
 import { registerBookingRoutes } from "./routes/bookings.ts";
 import { registerSessionRoutes } from "./routes/bookings-session.ts";
 import { registerChargerRoutes } from "./routes/chargers.ts";
+import { registerHostSessionRoutes } from "./routes/host-sessions.ts";
 import { registerHostRoutes } from "./routes/hosts.ts";
 import { registerMeRoutes } from "./routes/me.ts";
 import { registerPaymentMethodRoutes } from "./routes/payment-methods.ts";
+import { registerReceiptRoutes } from "./routes/receipts.ts";
 import { registerTaxDetailRoutes } from "./routes/tax-details.ts";
 import { registerStripeWebhook } from "./routes/webhooks.ts";
 import type { Services } from "./services.ts";
 import { SESSION_JOBS } from "./sessions/jobs.ts";
 import { DEFAULT_SESSION_TIMINGS, type SessionServices } from "./sessions/services.ts";
+import { settlementEventHandler } from "./settlement/events.ts";
+import { SETTLEMENT_JOBS } from "./settlement/jobs.ts";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -145,6 +150,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     jobs: deps.jobs,
     platformFeeBps: config.platformFeeBps,
     log: app.log,
+    email: deps.email,
   };
 
   // Realtime: open WebSockets per user, fed by charger events and the API's own changes.
@@ -194,20 +200,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerPaymentMethodRoutes(scope, services);
     registerStripeWebhook(scope, services, config.stripeWebhookSecret);
     registerTaxDetailRoutes(scope, deps);
+    registerReceiptRoutes(scope, services);
+    registerHostSessionRoutes(scope, sessionServices);
+    registerAdminRoutes(scope, sessionServices, config.adminUserIds);
     done();
   });
 
   // Jobs run in this process: they start once the app is ready and stop,
   // letting running jobs finish, when it closes.
   let unsubscribe: () => void = () => undefined;
+  const settlementEvents = settlementEventHandler(sessionServices);
   app.addHook("onReady", async () => {
     await deps.jobs.start(
-      [...BOOKING_JOBS, ...COMPLIANCE_JOBS, ...SESSION_JOBS],
+      [...BOOKING_JOBS, ...COMPLIANCE_JOBS, ...SESSION_JOBS, ...SETTLEMENT_JOBS],
       sessionServices,
       app.log,
     );
+    // One listener feeds the realtime feed and settlement; handlers only queue work.
     unsubscribe = await deps.chargerEvents.subscribeAll((signal) => {
       feed.handle(signal);
+      settlementEvents.handle(signal).catch((error: unknown) => {
+        app.log.error({ err: error }, "settlement event handler failed");
+      });
     });
   });
   app.addHook("preClose", () => {
