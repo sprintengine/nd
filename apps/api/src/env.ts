@@ -128,8 +128,11 @@ export const apiEnvSchema = z
     APPLE_APP_BUNDLE_ID: optional(z.string().min(1)),
     GOOGLE_CLIENT_ID: optionalSecret,
     GOOGLE_CLIENT_SECRET: optionalSecret,
-    /** How email is sent: `smtp`, `resend`, or `console` (written to the log; development). */
-    EMAIL_PROVIDER: orDefault(z.enum(["console", "smtp", "resend"]).default("console")),
+    /**
+     * How email is sent: `smtp`, `resend`, `console` (written to the log; development), or
+     * `capture` (kept in memory for GET /e2e/messages; end-to-end tests, with E2E_TEST_HOOKS).
+     */
+    EMAIL_PROVIDER: orDefault(z.enum(["console", "smtp", "resend", "capture"]).default("console")),
     /** Sender of every email, e.g. `nd <no-reply@example.com>`. Required by smtp and resend. */
     EMAIL_FROM: optional(sender),
     SMTP_HOST: optional(z.string().min(1)),
@@ -139,8 +142,8 @@ export const apiEnvSchema = z
     SMTP_USER: optionalSecret,
     SMTP_PASSWORD: optionalSecret,
     RESEND_API_KEY: optionalSecret,
-    /** How phone codes are sent: `twilio`, or `console` (development). */
-    SMS_PROVIDER: orDefault(z.enum(["console", "twilio"]).default("console")),
+    /** How phone codes are sent: `twilio`, `console` (development), or `capture` (as for email). */
+    SMS_PROVIDER: orDefault(z.enum(["console", "twilio", "capture"]).default("console")),
     TWILIO_ACCOUNT_SID: optional(
       z.string().regex(/^AC[0-9a-fA-F]{32}$/, "must be AC and 32 hex digits"),
     ),
@@ -166,6 +169,11 @@ export const apiEnvSchema = z
     ),
     /** Lets production start without a push provider (pushes are then dropped), e.g. for end-to-end tests. */
     ALLOW_CONSOLE_PUSH: z.enum(["true", "false"]).default("false"),
+    /**
+     * Hooks for black-box end-to-end tests: the `capture` senders and GET /e2e/messages,
+     * which hands out sign-in links and phone codes. Refused in production.
+     */
+    E2E_TEST_HOOKS: z.enum(["true", "false"]).default("false"),
     /** Keys for hosts' tax details: `id:base64key` pairs, comma-separated, the first current. */
     TAX_ENCRYPTION_KEYS: optional(taxKeys),
     /** Stripe secret key; without it, becoming a host answers 503. */
@@ -220,8 +228,20 @@ export const apiEnvSchema = z
         context.addIssue({ code: "custom", path: [name], message: `required ${because}` });
       }
     };
-    if (env.EMAIL_PROVIDER !== "console")
+    if (env.EMAIL_PROVIDER === "smtp" || env.EMAIL_PROVIDER === "resend")
       need("EMAIL_FROM", `with EMAIL_PROVIDER=${env.EMAIL_PROVIDER}`);
+    if (env.E2E_TEST_HOOKS !== "true") {
+      for (const name of ["EMAIL_PROVIDER", "SMS_PROVIDER"] as const) {
+        if (env[name] === "capture") {
+          context.addIssue({
+            code: "custom",
+            path: [name],
+            message:
+              "is capture, which only end-to-end test stacks use: it needs E2E_TEST_HOOKS=true",
+          });
+        }
+      }
+    }
     if (env.EMAIL_PROVIDER === "smtp") need("SMTP_HOST", "with EMAIL_PROVIDER=smtp");
     if (env.EMAIL_PROVIDER === "resend") need("RESEND_API_KEY", "with EMAIL_PROVIDER=resend");
     if ((env.SMTP_USER === undefined) !== (env.SMTP_PASSWORD === undefined)) {
@@ -259,6 +279,14 @@ export const apiEnvSchema = z
       }
     }
     if (env.NODE_ENV === "production") {
+      if (env.E2E_TEST_HOOKS === "true") {
+        context.addIssue({
+          code: "custom",
+          path: ["E2E_TEST_HOOKS"],
+          message:
+            "must not be true in production: it exposes sign-in links and phone codes over HTTP",
+        });
+      }
       // Fail fast rather than run with sign-in links and codes going nowhere.
       if (env.ALLOW_CONSOLE_MESSAGES !== "true") {
         for (const name of ["EMAIL_PROVIDER", "SMS_PROVIDER"] as const) {

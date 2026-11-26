@@ -199,6 +199,42 @@ describe("message providers", () => {
   });
 });
 
+describe("E2E_TEST_HOOKS", () => {
+  it("is off by default and allows the capture senders when on, outside production", () => {
+    expect(apiEnvSchema.parse(required).E2E_TEST_HOOKS).toBe("false");
+    const env = apiEnvSchema.parse({
+      ...required,
+      NODE_ENV: "test",
+      E2E_TEST_HOOKS: "true",
+      EMAIL_PROVIDER: "capture",
+      SMS_PROVIDER: "capture",
+    });
+    expect(env).toMatchObject({ EMAIL_PROVIDER: "capture", SMS_PROVIDER: "capture" });
+  });
+
+  it("refuses the capture senders without it", () => {
+    expect(() =>
+      parseEnv(apiEnvSchema, { ...required, EMAIL_PROVIDER: "capture", SMS_PROVIDER: "capture" }),
+    ).toThrow(
+      /E2E_TEST_HOOKS=true[\s\S]*EMAIL_PROVIDER[\s\S]*E2E_TEST_HOOKS=true[\s\S]*SMS_PROVIDER/,
+    );
+  });
+
+  it("refuses to start in production with it on", () => {
+    expect(() => parseEnv(apiEnvSchema, { ...production, E2E_TEST_HOOKS: "true" })).toThrow(
+      /must not be true in production[\s\S]*E2E_TEST_HOOKS/,
+    );
+    expect(() =>
+      parseEnv(apiEnvSchema, {
+        ...production,
+        E2E_TEST_HOOKS: "true",
+        EMAIL_PROVIDER: "capture",
+        SMS_PROVIDER: "capture",
+      }),
+    ).toThrow(/must not be true in production/);
+  });
+});
+
 describe("TAX_ENCRYPTION_KEYS", () => {
   it("is required in production", () => {
     expect(() => parseEnv(apiEnvSchema, { ...production, TAX_ENCRYPTION_KEYS: "" })).toThrow(

@@ -31,6 +31,7 @@ import { registerBookingRoutes } from "./routes/bookings.ts";
 import { registerSessionRoutes } from "./routes/bookings-session.ts";
 import { registerChargerRoutes } from "./routes/chargers.ts";
 import { registerDeviceRoutes } from "./routes/devices.ts";
+import { registerE2eRoutes } from "./routes/e2e.ts";
 import { registerHostSessionRoutes } from "./routes/host-sessions.ts";
 import { registerHostRoutes } from "./routes/hosts.ts";
 import { registerHostDashboardRoutes } from "./routes/hosts-dashboard.ts";
@@ -83,6 +84,9 @@ export function loggerOptions(level: string): FastifyServerOptions["logger"] {
  */
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, ids } = deps;
+  if (config.production && deps.testHooks !== undefined) {
+    throw new Error("end-to-end test hooks must never run in production");
+  }
   const app = Fastify({
     logger: deps.logger ?? false,
     // Trust exactly the configured number of proxies in front of the API.
@@ -216,6 +220,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerReceiptRoutes(scope, services);
     registerHostSessionRoutes(scope, sessionServices);
     registerAdminRoutes(scope, sessionServices, config.adminUserIds);
+    if (deps.testHooks !== undefined) registerE2eRoutes(scope, deps.testHooks.messages);
     done();
   });
 

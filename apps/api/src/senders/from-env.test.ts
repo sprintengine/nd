@@ -95,6 +95,30 @@ describe("sendersFromEnv", () => {
     }
   });
 
+  it("keeps messages in memory for end-to-end tests", async () => {
+    const env = apiEnvSchema.parse({
+      ...base,
+      E2E_TEST_HOOKS: "true",
+      EMAIL_PROVIDER: "capture",
+      SMS_PROVIDER: "capture",
+    });
+    const { email, sms, capture } = sendersFromEnv(env);
+    await email.send({ to: "dev@example.com", subject: "s", text: "link" });
+    await sms.send({ to: "+353861234567", body: "code 123456" });
+    expect(capture?.list().map((message) => message.text)).toEqual(["link", "code 123456"]);
+    expect(sendersFromEnv(apiEnvSchema.parse(base)).capture).toBeUndefined();
+  });
+
+  it("refuses the capture senders without the test hooks", () => {
+    const env = apiEnvSchema.parse(base);
+    expect(() => sendersFromEnv({ ...env, EMAIL_PROVIDER: "capture" })).toThrow(
+      /E2E_TEST_HOOKS=true is required/,
+    );
+    expect(() => sendersFromEnv({ ...env, SMS_PROVIDER: "capture" })).toThrow(
+      /E2E_TEST_HOOKS=true is required/,
+    );
+  });
+
   it("refuses to build a provider the schema did not complete", () => {
     expect(() => sendersFromEnv({ ...apiEnvSchema.parse(base), EMAIL_PROVIDER: "resend" })).toThrow(
       /RESEND_API_KEY is required/,

@@ -7,6 +7,7 @@ import type { ChargerEvents } from "./events/charger-events.ts";
 import type { JobRunner } from "./jobs/jobs.ts";
 import type { PushSender } from "./push/push.ts";
 import type { RealtimeHubOptions } from "./realtime/hub.ts";
+import type { MessageCapture } from "./senders/capture.ts";
 import type { EmailSender, SmsSender } from "./senders/senders.ts";
 import type { SessionTimings } from "./sessions/services.ts";
 import type { StripePayments } from "./stripe/payments.ts";
@@ -43,6 +44,11 @@ export interface AppDeps {
   readonly sessionTimings?: Partial<SessionTimings>;
   /** Realtime connection limits and heartbeat; defaults suit production. */
   readonly realtime?: Partial<Omit<RealtimeHubOptions, "log">>;
+  /**
+   * Hooks for black-box end-to-end tests (E2E_TEST_HOOKS): with them,
+   * GET /e2e/messages lists what the capture senders kept. Never in production.
+   */
+  readonly testHooks?: { readonly messages: MessageCapture };
   /** Fastify logger settings; `false` (the default) keeps tests quiet. */
   readonly logger?: FastifyServerOptions["logger"];
 }

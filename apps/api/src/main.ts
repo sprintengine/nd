@@ -22,7 +22,7 @@ const stripeSdk =
     ? undefined
     : createStripeSdk(env.STRIPE_SECRET_KEY, env.STRIPE_API_BASE_URL);
 
-const { email, sms } = sendersFromEnv(env);
+const { email, sms, capture } = sendersFromEnv(env);
 const app = buildApp({
   config,
   database,
@@ -43,7 +43,12 @@ const app = buildApp({
     app.log.warn({ err: error }, "charger events connection failed; reconnecting");
   }),
   logger: loggerOptions(env.LOG_LEVEL),
+  // Only with E2E_TEST_HOOKS=true, which the environment schema refuses in production.
+  ...(capture === undefined ? {} : { testHooks: { messages: capture } }),
 });
+if (capture !== undefined) {
+  app.log.warn("end-to-end test hooks are on: GET /e2e/messages shows sign-in links and codes");
+}
 registerReadiness(app, probe);
 
 closeOnSignal(
