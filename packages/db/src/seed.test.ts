@@ -42,7 +42,10 @@ describe("buildSeedData", () => {
   it("uses unique idTags within the OCPP length limit", () => {
     const tags = data.bookings.map((booking) => booking.idTag);
     expect(new Set(tags).size).toBe(tags.length);
-    for (const tag of tags) expect(tag.length).toBeLessThanOrEqual(ID_TAG_MAX_LENGTH);
+    for (const tag of tags) {
+      expect(tag).toBeTypeOf("string");
+      expect(tag?.length).toBeLessThanOrEqual(ID_TAG_MAX_LENGTH);
+    }
   });
 
   it("never overlaps slot-holding bookings on one charger", () => {

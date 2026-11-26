@@ -34,6 +34,7 @@ describe("schema", () => {
       "payments",
       "reviews",
       "sessions",
+      "stripe_webhook_events",
       "transfers",
       "users",
     ]);

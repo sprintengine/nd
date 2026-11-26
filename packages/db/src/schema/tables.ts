@@ -90,12 +90,18 @@ export const hosts = pgTable(
     nightRateStart: time("night_rate_start"),
     nightRateEnd: time("night_rate_end"),
     maxSessionsPerDay: smallint("max_sessions_per_day").notNull().default(2),
+    /** Cancelling is free until this many minutes before a booking starts. */
+    cancellationCutoffMinutes: smallint("cancellation_cutoff_minutes").notNull().default(120),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
     check("hosts_tax_country_format", sql`${table.taxCountry} ~ '^[A-Z]{2}$'`),
     check("hosts_max_sessions_per_day_positive", sql`${table.maxSessionsPerDay} >= 1`),
+    check(
+      "hosts_cancellation_cutoff_range",
+      sql`${table.cancellationCutoffMinutes} between 0 and 1440`,
+    ),
     check(
       "hosts_night_rate_window_complete",
       sql`(${table.nightRateStart} is null) = (${table.nightRateEnd} is null)`,
@@ -189,9 +195,11 @@ export const bookings = pgTable(
       .references(() => users.id),
     slot: timeRange("slot").notNull(),
     status: bookingStatus("status").notNull().default("requested"),
-    /** Single-use OCPP idTag for this booking, generated server-side. */
-    idTag: varchar("id_tag", { length: ID_TAG_MAX_LENGTH }).notNull().unique(),
+    /** Single-use OCPP idTag, generated server-side when the booking is confirmed. */
+    idTag: varchar("id_tag", { length: ID_TAG_MAX_LENGTH }).unique(),
     quotedAmountCents: integer("quoted_amount_cents").notNull(),
+    /** Hourly price the quote was made at; billing and fees use it. Set on every booking the API makes. */
+    pricePerHourCents: integer("price_per_hour_cents"),
     currency: currency("currency").notNull().default("EUR"),
     kwhCap: numeric("kwh_cap", { precision: 6, scale: 2, mode: "number" }),
     vehiclePlate: text("vehicle_plate"),
@@ -212,7 +220,12 @@ export const bookings = pgTable(
       sql`not isempty(${table.slot}) and not lower_inf(${table.slot}) and not upper_inf(${table.slot})`,
     ),
     check("bookings_id_tag_not_empty", sql`char_length(${table.idTag}) > 0`),
+    check(
+      "bookings_id_tag_when_confirmed",
+      sql`${table.idTag} is not null or ${table.status} in ('requested', 'cancelled')`,
+    ),
     check("bookings_quoted_amount_non_negative", sql`${table.quotedAmountCents} >= 0`),
+    check("bookings_price_per_hour_non_negative", sql`${table.pricePerHourCents} >= 0`),
     check("bookings_cancellation_fee_non_negative", sql`${table.cancellationFeeCents} >= 0`),
     check(
       "bookings_scheduled_start_in_slot",
@@ -310,6 +323,12 @@ export const payments = pgTable(
       .references(() => bookings.id),
     stripePaymentIntentId: text("stripe_payment_intent_id").unique(),
     stripeSetupIntentId: text("stripe_setup_intent_id").unique(),
+    /** The driver's saved card the authorisation is made with. */
+    stripePaymentMethodId: text("stripe_payment_method_id"),
+    /** The charge a capture produced; transfers to the host name it as their source. */
+    stripeChargeId: text("stripe_charge_id").unique(),
+    /** Why authorising failed (a Stripe decline code), when it did. */
+    failureReason: text("failure_reason"),
     /** When the authorisation job should create the PaymentIntent (saved-card path). */
     authoriseAt: timestamptz("authorise_at"),
     authorisedCents: integer("authorised_cents").notNull().default(0),
@@ -352,7 +371,7 @@ export const transfers = pgTable(
     updatedAt: updatedAt(),
   },
   (table) => [
-    index("transfers_payment_id_idx").on(table.paymentId),
+    unique("transfers_payment_id_unique").on(table.paymentId),
     index("transfers_status_idx").on(table.status),
     check("transfers_amount_non_negative", sql`${table.amountCents} >= 0`),
     check(
@@ -428,3 +447,11 @@ export const deviceTokens = pgTable(
   },
   (table) => [index("device_tokens_user_id_idx").on(table.userId)],
 );
+
+/** Stripe webhook events already processed, so a redelivery is acknowledged and skipped. */
+export const stripeWebhookEvents = pgTable("stripe_webhook_events", {
+  /** Stripe's event id (`evt_…`). */
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  receivedAt: timestamptz("received_at").notNull().defaultNow(),
+});

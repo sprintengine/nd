@@ -160,4 +160,19 @@ describe("bookings id_tag", () => {
     );
     expect(code).toBe(CHECK_VIOLATION);
   });
+
+  it("is issued at confirmation: a request may have none, a confirmed booking must", async () => {
+    await expect(
+      insertBooking(database.db, chargerId, driverId, utcWindow("2027-02-07T22:00:00Z", 8), {
+        status: "requested",
+        idTag: null,
+      }),
+    ).resolves.toHaveLength(1);
+    const code = await pgErrorCode(
+      insertBooking(database.db, chargerId, driverId, utcWindow("2027-02-09T22:00:00Z", 8), {
+        idTag: null,
+      }),
+    );
+    expect(code).toBe(CHECK_VIOLATION);
+  });
 });
