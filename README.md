@@ -39,6 +39,9 @@ Installs are engine-strict: they fail on other Node.js or pnpm majors.
 ```sh
 pnpm install          # also installs the git hooks (lefthook)
 pnpm db:up            # Postgres 17 + PostGIS on localhost:54320
+export DATABASE_URL=postgres://nd:nd@localhost:54320/nd
+pnpm db:migrate       # apply the schema migrations
+pnpm db:seed          # optional: sample hosts, chargers and bookings around Dublin 6
 pnpm dev              # api on :3000 and ocpp-gateway on :9000, restart on change
 ```
 
