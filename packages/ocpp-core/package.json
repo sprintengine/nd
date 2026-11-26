@@ -2,7 +2,7 @@
   "name": "@nd/ocpp-core",
   "version": "0.0.0",
   "private": true,
-  "description": "OCPP 1.6J message types, framing and validation.",
+  "description": "OCPP 1.6J message types, framing, validation and RPC, with a Zappi simulator.",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -10,6 +10,11 @@
       "@nd/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./sim": {
+      "@nd/source": "./src/sim/index.ts",
+      "types": "./dist/sim/index.d.ts",
+      "default": "./dist/sim/index.js"
     }
   },
   "scripts": {
