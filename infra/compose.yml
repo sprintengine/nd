@@ -94,6 +94,25 @@ services:
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       PLATFORM_FEE_BPS: ${PLATFORM_FEE_BPS:-0}
+      # Email: smtp or resend. Sign-in links go out this way.
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:?set EMAIL_PROVIDER in infra/.env}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      # SMS: twilio. Phone verification codes go out this way.
+      SMS_PROVIDER: ${SMS_PROVIDER:?set SMS_PROVIDER in infra/.env}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM: ${TWILIO_FROM:-}
+      TWILIO_MESSAGING_SERVICE_SID: ${TWILIO_MESSAGING_SERVICE_SID:-}
+      # The api refuses to start with console senders unless this is true.
+      ALLOW_CONSOLE_MESSAGES: ${ALLOW_CONSOLE_MESSAGES:-false}
+      # Encrypts hosts' tax numbers; see "Tax encryption keys" in docs/RUNBOOK.md.
+      TAX_ENCRYPTION_KEYS: ${TAX_ENCRYPTION_KEYS:?set TAX_ENCRYPTION_KEYS in infra/.env}
     healthcheck:
       # /readyz also checks Postgres; the image's own HEALTHCHECK is liveness only.
       test:

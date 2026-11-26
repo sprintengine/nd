@@ -50,6 +50,13 @@ services:
       # Not a real secret: webhooks in this stack are signed with it by the test.
       STRIPE_WEBHOOK_SECRET: whsec_e2e_not_a_real_secret
       PLATFORM_FEE_BPS: "0"
+      # No messages leave the stack: console senders, which production
+      # refuses unless ALLOW_CONSOLE_MESSAGES is true (and then redact).
+      EMAIL_PROVIDER: console
+      SMS_PROVIDER: console
+      ALLOW_CONSOLE_MESSAGES: "true"
+      # Not a real secret: 32 bytes of ASCII, base64-encoded.
+      TAX_ENCRYPTION_KEYS: e2e:ZTJlLXRheC1rZXktbm90LWEtcmVhbC1zZWNyZXQtMDA=
     healthcheck:
       test:
         - CMD
