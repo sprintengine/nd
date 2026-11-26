@@ -57,6 +57,8 @@ services:
       EMAIL_PROVIDER: console
       SMS_PROVIDER: console
       ALLOW_CONSOLE_MESSAGES: "true"
+      # No push provider either: pushes are dropped (and redacted in the log).
+      ALLOW_CONSOLE_PUSH: "true"
       # Not a real secret: 32 bytes of ASCII, base64-encoded.
       TAX_ENCRYPTION_KEYS: e2e:ZTJlLXRheC1rZXktbm90LWEtcmVhbC1zZWNyZXQtMDA=
     healthcheck:

@@ -32,6 +32,7 @@ describe("sendersFromEnv", () => {
       PUBLIC_API_URL: "https://api.example.com",
       OCPP_WSS_URL: "wss://ocpp.example.com/v16/",
       ALLOW_CONSOLE_MESSAGES: "true",
+      ALLOW_CONSOLE_PUSH: "true",
       TAX_ENCRYPTION_KEYS: `k1:${Buffer.alloc(32).toString("base64")}`,
     });
     const { email } = sendersFromEnv(env, { sink: (line) => lines.push(line) });

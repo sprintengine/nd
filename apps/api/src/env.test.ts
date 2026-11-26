@@ -83,7 +83,72 @@ const production = {
   TWILIO_AUTH_TOKEN: "token",
   TWILIO_FROM: "+15005550006",
   TAX_ENCRYPTION_KEYS: `k1:${KEY}`,
+  VAPID_PUBLIC_KEY: Buffer.alloc(65, 4).toString("base64url"),
+  VAPID_PRIVATE_KEY: Buffer.alloc(32, 9).toString("base64url"),
+  VAPID_SUBJECT: "mailto:dev@example.com",
 };
+
+const SERVICE_ACCOUNT = JSON.stringify({
+  project_id: "nd-test",
+  client_email: "push@nd-test.iam.gserviceaccount.com",
+  private_key: "-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----\n",
+});
+
+describe("push providers", () => {
+  it("refuse to run production without one unless console pushes are allowed", () => {
+    const none = {
+      ...production,
+      VAPID_PUBLIC_KEY: "",
+      VAPID_PRIVATE_KEY: "",
+      VAPID_SUBJECT: "",
+    };
+    expect(() => parseEnv(apiEnvSchema, none)).toThrow(/ALLOW_CONSOLE_PUSH=true/);
+    expect(apiEnvSchema.parse({ ...none, ALLOW_CONSOLE_PUSH: "true" }).ALLOW_CONSOLE_PUSH).toBe(
+      "true",
+    );
+    expect(
+      apiEnvSchema.parse({ ...none, FCM_SERVICE_ACCOUNT_JSON: SERVICE_ACCOUNT })
+        .FCM_SERVICE_ACCOUNT_JSON,
+    ).toMatchObject({ project_id: "nd-test" });
+    expect(() =>
+      parseEnv(apiEnvSchema, { ...none, FCM_SERVICE_ACCOUNT_FILE: "/run/secrets/fcm.json" }),
+    ).not.toThrow();
+  });
+
+  it("parse the service account without echoing it", () => {
+    const secret = "not-json-but-secret";
+    expect(() => parseEnv(apiEnvSchema, { ...required, FCM_SERVICE_ACCOUNT_JSON: secret })).toThrow(
+      /service account key file's JSON/,
+    );
+    try {
+      parseEnv(apiEnvSchema, { ...required, FCM_SERVICE_ACCOUNT_JSON: secret });
+    } catch (error) {
+      expect(String(error)).not.toContain(secret);
+    }
+    expect(() =>
+      parseEnv(apiEnvSchema, { ...required, FCM_SERVICE_ACCOUNT_JSON: '{"project_id":"x"}' }),
+    ).toThrow(/project_id, client_email and private_key/);
+    expect(() =>
+      parseEnv(apiEnvSchema, {
+        ...required,
+        FCM_SERVICE_ACCOUNT_JSON: SERVICE_ACCOUNT,
+        FCM_SERVICE_ACCOUNT_FILE: "/run/secrets/fcm.json",
+      }),
+    ).toThrow(/not both/);
+  });
+
+  it("need all three VAPID settings, with keys of the right size", () => {
+    expect(() =>
+      parseEnv(apiEnvSchema, { ...required, VAPID_PUBLIC_KEY: production.VAPID_PUBLIC_KEY }),
+    ).toThrow(/VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT/);
+    expect(() =>
+      parseEnv(apiEnvSchema, { ...production, VAPID_PRIVATE_KEY: production.VAPID_PUBLIC_KEY }),
+    ).toThrow(/32 bytes/);
+    expect(() =>
+      parseEnv(apiEnvSchema, { ...production, VAPID_SUBJECT: "dev@example.com" }),
+    ).toThrow(/mailto/);
+  });
+});
 
 describe("message providers", () => {
   it("refuse console senders in production", () => {

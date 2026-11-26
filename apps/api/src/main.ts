@@ -6,6 +6,7 @@ import { randomIds, systemClock } from "./deps.ts";
 import { createPgChargerEvents } from "./events/charger-events.ts";
 import { apiEnvSchema, buildApp, configFromEnv, loggerOptions } from "./index.ts";
 import { createPgBossRunner } from "./jobs/pg-boss.ts";
+import { pushFromEnv } from "./push/from-env.ts";
 import { createDatabaseProbe, registerReadiness } from "./readiness.ts";
 import { sendersFromEnv } from "./senders/from-env.ts";
 import { closeOnSignal } from "./shutdown.ts";
@@ -37,6 +38,7 @@ const app = buildApp({
     baseUrl: env.GATEWAY_INTERNAL_URL,
     secret: env.GATEWAY_INTERNAL_SECRET,
   }),
+  push: pushFromEnv(env),
   chargerEvents: createPgChargerEvents(env.DATABASE_URL, (error) => {
     app.log.warn({ err: error }, "charger events connection failed; reconnecting");
   }),

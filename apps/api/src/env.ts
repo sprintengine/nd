@@ -1,6 +1,7 @@
 import { port } from "@nd/config";
 import { z } from "zod";
 
+import type { FcmServiceAccount } from "./push/fcm.ts";
 import { parseTaxKeyring, type TaxKeyring } from "./tax/crypto.ts";
 
 const NODE_ENVS = ["development", "test", "production"] as const;
@@ -58,6 +59,41 @@ const taxKeys = z.string().transform((value, context): TaxKeyring => {
     return z.NEVER;
   }
 });
+
+/** A Google service account key as JSON; errors never echo its content. */
+export const serviceAccountJson = z.string().transform((value, context): FcmServiceAccount => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "must be the service account key file's JSON" });
+    return z.NEVER;
+  }
+  const account = z
+    .object({
+      project_id: z.string().min(1),
+      client_email: z.string().min(1),
+      private_key: z.string().min(1),
+    })
+    .safeParse(parsed);
+  if (!account.success) {
+    context.addIssue({
+      code: "custom",
+      message: "must be a service account key with project_id, client_email and private_key",
+    });
+    return z.NEVER;
+  }
+  return account.data;
+});
+
+/** A base64url key of `bytes` bytes, such as a VAPID key. */
+const base64UrlKey = (bytes: number) =>
+  z
+    .string()
+    .refine(
+      (value) => /^[A-Za-z0-9_-]+$/.test(value) && Buffer.from(value, "base64url").length === bytes,
+      `must be a base64url key of ${String(bytes)} bytes`,
+    );
 
 /**
  * Environment the API reads at start-up. Every value is validated here, so a
@@ -117,6 +153,19 @@ export const apiEnvSchema = z
     ),
     /** Lets production start with console senders (they send nothing), e.g. for end-to-end tests. */
     ALLOW_CONSOLE_MESSAGES: z.enum(["true", "false"]).default("false"),
+    /** Firebase service account key (JSON) for FCM pushes to iOS and Android… */
+    FCM_SERVICE_ACCOUNT_JSON: optional(serviceAccountJson),
+    /** …or the path of that JSON file. */
+    FCM_SERVICE_ACCOUNT_FILE: optional(z.string().min(1)),
+    /** VAPID keys for web push (base64url, as `web-push generate-vapid-keys` prints them). */
+    VAPID_PUBLIC_KEY: optional(base64UrlKey(65)),
+    VAPID_PRIVATE_KEY: optional(base64UrlKey(32)),
+    /** Contact push services can reach the operator at: `mailto:` or an https URL. */
+    VAPID_SUBJECT: optional(
+      z.string().regex(/^(mailto:\S+@\S+|https:\/\/\S+)$/, "must be mailto: or https:"),
+    ),
+    /** Lets production start without a push provider (pushes are then dropped), e.g. for end-to-end tests. */
+    ALLOW_CONSOLE_PUSH: z.enum(["true", "false"]).default("false"),
     /** Keys for hosts' tax details: `id:base64key` pairs, comma-separated, the first current. */
     TAX_ENCRYPTION_KEYS: optional(taxKeys),
     /** Stripe secret key; without it, becoming a host answers 503. */
@@ -182,6 +231,21 @@ export const apiEnvSchema = z
         message: "set both SMTP_USER and SMTP_PASSWORD, or neither",
       });
     }
+    if (env.FCM_SERVICE_ACCOUNT_JSON !== undefined && env.FCM_SERVICE_ACCOUNT_FILE !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["FCM_SERVICE_ACCOUNT_FILE"],
+        message: "set FCM_SERVICE_ACCOUNT_JSON or FCM_SERVICE_ACCOUNT_FILE, not both",
+      });
+    }
+    const vapid = [env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY, env.VAPID_SUBJECT];
+    if (vapid.some((value) => value === undefined) && vapid.some((value) => value !== undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["VAPID_SUBJECT"],
+        message: "set all of VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT, or none",
+      });
+    }
     if (env.SMS_PROVIDER === "twilio") {
       need("TWILIO_ACCOUNT_SID", "with SMS_PROVIDER=twilio");
       need("TWILIO_AUTH_TOKEN", "with SMS_PROVIDER=twilio");
@@ -207,6 +271,18 @@ export const apiEnvSchema = z
             });
           }
         }
+      }
+      const push =
+        env.FCM_SERVICE_ACCOUNT_JSON !== undefined ||
+        env.FCM_SERVICE_ACCOUNT_FILE !== undefined ||
+        env.VAPID_PUBLIC_KEY !== undefined;
+      if (!push && env.ALLOW_CONSOLE_PUSH !== "true") {
+        context.addIssue({
+          code: "custom",
+          path: ["FCM_SERVICE_ACCOUNT_JSON"],
+          message:
+            "no push provider is configured, so pushes would go nowhere: set FCM_SERVICE_ACCOUNT_JSON (or _FILE) or the VAPID keys in production, or ALLOW_CONSOLE_PUSH=true to run without one",
+        });
       }
       need("TAX_ENCRYPTION_KEYS", "in production: hosts' tax details are encrypted with it");
       if (!env.PUBLIC_API_URL.startsWith("https://")) {

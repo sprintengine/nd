@@ -112,6 +112,13 @@ services:
       TWILIO_MESSAGING_SERVICE_SID: ${TWILIO_MESSAGING_SERVICE_SID:-}
       # The api refuses to start with console senders unless this is true.
       ALLOW_CONSOLE_MESSAGES: ${ALLOW_CONSOLE_MESSAGES:-false}
+      # Push notifications: FCM for iOS and Android, VAPID keys for web push.
+      FCM_SERVICE_ACCOUNT_JSON: ${FCM_SERVICE_ACCOUNT_JSON:-}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+      # The api refuses to start without a push provider unless this is true.
+      ALLOW_CONSOLE_PUSH: ${ALLOW_CONSOLE_PUSH:-false}
       # Encrypts hosts' tax numbers; see "Tax encryption keys" in docs/RUNBOOK.md.
       TAX_ENCRYPTION_KEYS: ${TAX_ENCRYPTION_KEYS:?set TAX_ENCRYPTION_KEYS in infra/.env}
     healthcheck:

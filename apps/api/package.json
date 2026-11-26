@@ -28,10 +28,12 @@
     "drizzle-orm": "catalog:",
     "fastify": "catalog:",
     "fastify-type-provider-zod": "catalog:",
+    "firebase-admin": "catalog:",
     "nodemailer": "catalog:",
     "pg": "catalog:",
     "pg-boss": "catalog:",
     "stripe": "catalog:",
+    "web-push": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -39,6 +41,7 @@
     "@nd/ocpp-gateway": "workspace:*",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
+    "@types/web-push": "catalog:",
     "@types/ws": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "eslint": "catalog:",
