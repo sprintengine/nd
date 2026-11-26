@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { deletionScheduledEmail, escapeHtml, magicLinkEmail, phoneCodeSms } from "./templates.ts";
 
 const LINK = "https://api.example.com/auth/magic-link/verify?token=abc&callbackURL=%2F";
+// The same link as it must appear in an HTML attribute: every "&" escaped.
+const LINK_IN_HTML = "https://api.example.com/auth/magic-link/verify?token=abc&amp;callbackURL=%2F";
 
 describe("magicLinkEmail", () => {
   const email = magicLinkEmail({ url: LINK, expiresInMinutes: 15 });
@@ -14,14 +16,14 @@ describe("magicLinkEmail", () => {
   });
 
   it("escapes the link in the HTML part", () => {
-    expect(email.html).toContain(`href="${LINK.replace("&", "&amp;")}"`);
+    expect(email.html).toContain(`href="${LINK_IN_HTML}"`);
     expect(email.html).not.toContain("token=abc&callbackURL");
   });
 
   it("loads nothing remote and tracks nothing", () => {
     expect(email.html).not.toMatch(/<img|<script|<link|url\(|@import|src=/i);
     const hrefs = [...email.html.matchAll(/href="([^"]*)"/g)].map((match) => match[1]);
-    expect(new Set(hrefs)).toEqual(new Set([LINK.replace("&", "&amp;")]));
+    expect(new Set(hrefs)).toEqual(new Set([LINK_IN_HTML]));
   });
 });
 
