@@ -1,14 +1,18 @@
+/**
+ * OCPP 1.6J (JSON over WebSocket): framing, Zod schemas and types for the
+ * message subset a myenergi Zappi uses, and a transport-agnostic RPC peer.
+ */
+
+export * from "./actions.ts";
+export * from "./errors.ts";
+export * from "./framing.ts";
+export * from "./rpc.ts";
+export * from "./schemas/central-system.ts";
+export * from "./schemas/charge-point.ts";
+export * from "./schemas/common.ts";
+
 /** WebSocket subprotocol a charge point must offer for OCPP 1.6 JSON. */
 export const OCPP16_SUBPROTOCOL = "ocpp1.6";
-
-/** The first element of every OCPP-J frame. */
-export const MessageTypeId = {
-  Call: 2,
-  CallResult: 3,
-  CallError: 4,
-} as const;
-
-export type MessageTypeId = (typeof MessageTypeId)[keyof typeof MessageTypeId];
 
 /**
  * Picks the subprotocol to accept from those offered on the WebSocket upgrade.
