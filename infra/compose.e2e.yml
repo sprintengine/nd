@@ -54,6 +54,8 @@ services:
     image: nd-ocpp-gateway:e2e
     environment:
       DATABASE_URL: postgres://nd:nd@postgres:5432/nd
+      # Not a real secret: the internal ChargerControl endpoint's bearer token.
+      GATEWAY_INTERNAL_SECRET: e2e-internal-secret-not-for-production-use
     healthcheck:
       test:
         - CMD

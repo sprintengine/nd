@@ -92,6 +92,9 @@ services:
     image: ${ND_IMAGE_PREFIX:-ghcr.io/sprintengine}/nd-ocpp-gateway:${ND_IMAGE_TAG:-main}
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-nd}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env}@postgres:5432/${POSTGRES_DB:-nd}
+      # Bearer secret for the internal ChargerControl endpoint on port 9100,
+      # which Caddy never forwards (only /v16/* and /healthz are public).
+      GATEWAY_INTERNAL_SECRET: ${GATEWAY_INTERNAL_SECRET:?set GATEWAY_INTERNAL_SECRET in infra/.env}
     healthcheck:
       test:
         - CMD
@@ -102,7 +105,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
-    expose: ["9000"]
+    # 9000: OCPP (proxied by Caddy). 9100: internal ChargerControl, for the api only.
+    expose: ["9000", "9100"]
     networks: [edge, backend]
 
   postgres:

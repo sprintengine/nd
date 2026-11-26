@@ -131,6 +131,8 @@ jobs:
       - name: Run the smoke test
         env:
           E2E_NO_BUILD: "1"
+          # The gateway checks Basic Auth, so an upgrade without credentials is a 401.
+          E2E_EXPECT_WS_STATUS: "401"
         run: infra/e2e-smoke.sh
 
   # One stable check to require in branch protection, as in ci.yml.

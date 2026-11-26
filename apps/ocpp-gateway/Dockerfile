@@ -42,9 +42,13 @@ LABEL org.opencontainers.image.title="nd-ocpp-gateway" \
   org.opencontainers.image.version="${VERSION}" \
   org.opencontainers.image.revision="${REVISION}"
 
+# The internal ChargerControl endpoint listens on every interface inside the
+# container; publish only 9000, and keep 9100 on the private network.
 ENV NODE_ENV=production \
   HOST=0.0.0.0 \
-  PORT=9000
+  PORT=9000 \
+  GATEWAY_INTERNAL_HOST=0.0.0.0 \
+  GATEWAY_INTERNAL_PORT=9100
 WORKDIR /app
 
 # Files stay owned by root and read-only to the nonroot user that runs them.
@@ -53,7 +57,7 @@ COPY --from=build /out/node_modules ./node_modules
 COPY --from=build /out/dist ./dist
 
 USER 65532:65532
-EXPOSE 9000
+EXPOSE 9000 9100
 
 # Liveness only: /healthz answers while the process runs. /readyz also checks Postgres.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
