@@ -19,13 +19,17 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "knip": "knip",
-    "lint:packages": "syncpack lint"
+    "lint:packages": "syncpack lint",
+    "commitlint": "commitlint"
   },
   "devDependencies": {
+    "@commitlint/cli": "catalog:",
+    "@commitlint/config-conventional": "catalog:",
     "@nd/config": "workspace:*",
     "@types/node": "catalog:",
     "eslint": "catalog:",
     "knip": "catalog:",
+    "lefthook": "catalog:",
     "prettier": "catalog:",
     "syncpack": "catalog:",
     "turbo": "catalog:",

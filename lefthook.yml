@@ -1,0 +1,18 @@
+# Git hooks, installed by `pnpm install` (lefthook's install script).
+# Skip once with `LEFTHOOK=0 git commit ...`; CI runs the same checks.
+
+pre-commit:
+  piped: true
+  jobs:
+    - name: format
+      run: pnpm exec prettier --write --ignore-unknown {staged_files}
+      stage_fixed: true
+    - name: lint
+      glob: "*.{js,ts}"
+      run: pnpm exec eslint --fix --no-warn-ignored {staged_files}
+      stage_fixed: true
+
+commit-msg:
+  jobs:
+    - name: commitlint
+      run: pnpm exec commitlint --edit {1}
