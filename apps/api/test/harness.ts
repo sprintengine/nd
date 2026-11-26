@@ -43,7 +43,12 @@ export async function startHarness(
   const mail = outbox();
   const stripe = fakeStripe();
   const stripeMock = statefulStripeMock();
-  const jobs = createPgBossRunner({ connectionString: database.url, pollingIntervalSeconds: 60 });
+  const jobs = createPgBossRunner({
+    connectionString: database.url,
+    pollingIntervalSeconds: 60,
+    // Recurring jobs run only when a test sends them.
+    schedules: false,
+  });
   const app = buildApp({
     config: testConfig(options.config),
     database,

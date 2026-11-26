@@ -102,6 +102,23 @@ describe("createPgBossRunner", () => {
     });
   });
 
+  it("leaves schedules alone when they are turned off", async () => {
+    const minutely = defineJob({
+      name: "minutely",
+      payload: z.object({}),
+      retry: { limit: 0, delaySeconds: 0, backoff: false },
+      cron: "* * * * *",
+      run: () => Promise.resolve(),
+    });
+    const runner = createPgBossRunner({
+      connectionString: "postgres://localhost/nd",
+      schedules: false,
+    });
+    await runner.start([job, minutely], "ctx", log);
+    expect(boss.schedule).not.toHaveBeenCalled();
+    expect(boss.unschedule).not.toHaveBeenCalled();
+  });
+
   it("reports pg-boss errors to the log", async () => {
     const runner = createPgBossRunner({ connectionString: "postgres://localhost/nd" });
     await runner.start([job], "ctx", log);

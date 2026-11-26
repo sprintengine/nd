@@ -24,6 +24,8 @@ export interface PgBossRunnerOptions {
   readonly pollingIntervalSeconds?: number;
   /** Connections pg-boss may open. */
   readonly maxConnections?: number;
+  /** Keep schedules in step with the jobs' `cron`. Default true; tests turn it off to stay deterministic. */
+  readonly schedules?: boolean;
 }
 
 /**
@@ -70,8 +72,10 @@ export function createPgBossRunner(options: PgBossRunnerOptions): JobRunner {
         // createQueue leaves an existing queue alone; apply changed settings.
         await boss.updateQueue(job.name, queue);
         // One schedule per job, kept in step with its definition.
-        if (job.cron === undefined) await boss.unschedule(job.name);
-        else await boss.schedule(job.name, job.cron, {}, { tz: "UTC" });
+        if (options.schedules !== false) {
+          if (job.cron === undefined) await boss.unschedule(job.name);
+          else await boss.schedule(job.name, job.cron, {}, { tz: "UTC" });
+        }
         known.set(job.name, job);
         await boss.work<unknown>(
           job.name,
