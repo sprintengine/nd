@@ -69,10 +69,10 @@ export function stripeConnectFrom(sdk: StripeSdk): StripeConnect {
   };
 }
 
-/** Stripe Connect with a secret key; `apiBaseUrl` points it at stripe-mock in tests. */
-export function createStripeConnect(secretKey: string, apiBaseUrl?: string): StripeConnect {
+/** The Stripe SDK with a secret key; `apiBaseUrl` points it at stripe-mock in tests. */
+export function createStripeSdk(secretKey: string, apiBaseUrl?: string): Stripe {
   const base = apiBaseUrl === undefined ? undefined : new URL(apiBaseUrl);
-  const sdk = new Stripe(secretKey, {
+  return new Stripe(secretKey, {
     maxNetworkRetries: 2,
     ...(base === undefined
       ? {}
@@ -82,7 +82,11 @@ export function createStripeConnect(secretKey: string, apiBaseUrl?: string): Str
           protocol: base.protocol === "https:" ? "https" : "http",
         }),
   });
-  return stripeConnectFrom(sdk);
+}
+
+/** Stripe Connect with a secret key; `apiBaseUrl` points it at stripe-mock in tests. */
+export function createStripeConnect(secretKey: string, apiBaseUrl?: string): StripeConnect {
+  return stripeConnectFrom(createStripeSdk(secretKey, apiBaseUrl));
 }
 
 /** Used when no Stripe key is configured: becoming a host answers 503. */

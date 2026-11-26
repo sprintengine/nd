@@ -4,6 +4,7 @@ import {
   validatorCompiler,
   type ZodTypeProvider,
 } from "fastify-type-provider-zod";
+import Stripe from "stripe";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -30,6 +31,9 @@ function app() {
   });
   typed.get("/odd", () => {
     throw Object.assign(new Error("odd status"), { statusCode: 499 });
+  });
+  typed.get("/stripe", () => {
+    throw new Stripe.errors.StripeAuthenticationError({ message: "Invalid API key sk_test_123" });
   });
   typed.get("/boom", () => {
     throw new Error("database password is hunter2");
@@ -83,6 +87,13 @@ describe("problem responses", () => {
     expect(response.statusCode).toBe(500);
     expect(response.body).not.toContain("hunter2");
     expect(response.json()).toMatchObject({ code: "internal", title: "Something went wrong" });
+  });
+
+  it("answers 502 for Stripe errors without passing their status or message on", async () => {
+    const response = await app().inject({ method: "GET", url: "/stripe" });
+    expect(response.statusCode).toBe(502);
+    expect(response.body).not.toContain("sk_test");
+    expect(response.json()).toMatchObject({ code: "payment-provider-error" });
   });
 
   it("answers unknown routes with 404", async () => {

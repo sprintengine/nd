@@ -2,6 +2,7 @@ import { STATUS_CODES } from "node:http";
 
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { hasZodFastifySchemaValidationErrors } from "fastify-type-provider-zod";
+import Stripe from "stripe";
 import { z } from "zod";
 
 /** Media type of every error response (RFC 9457). */
@@ -104,6 +105,19 @@ export function registerProblemHandlers(app: FastifyInstance): void {
       return sendProblem(
         reply,
         problemFor(request, error.status, error.code, error.title, error.detail, error.extras),
+      );
+    }
+    if (error instanceof Stripe.errors.StripeError) {
+      // Never pass Stripe's status or message on: they describe our account, not the request.
+      request.log.error({ err: error, stripeRequestId: error.requestId }, "Stripe call failed");
+      return sendProblem(
+        reply,
+        problemFor(
+          request,
+          502,
+          "payment-provider-error",
+          "The payment provider could not be reached",
+        ),
       );
     }
     if (hasZodFastifySchemaValidationErrors(error)) {
