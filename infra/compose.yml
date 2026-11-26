@@ -92,6 +92,8 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      PLATFORM_FEE_BPS: ${PLATFORM_FEE_BPS:-0}
     healthcheck:
       # /readyz also checks Postgres; the image's own HEALTHCHECK is liveness only.
       test:

@@ -25,7 +25,7 @@
     "test:integration": {
       "dependsOn": ["transit"],
       "cache": false,
-      "env": ["DATABASE_URL"]
+      "env": ["DATABASE_URL", "STRIPE_API_BASE_URL"]
     },
     "//#typecheck:root": {
       "inputs": ["*.ts", "tsconfig.json"]

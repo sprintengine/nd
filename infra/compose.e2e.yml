@@ -47,6 +47,9 @@ services:
       # Host onboarding calls Stripe; stripe-mock accepts any sk_test_ key.
       STRIPE_SECRET_KEY: sk_test_e2e
       STRIPE_API_BASE_URL: http://stripe-mock:12111
+      # Not a real secret: webhooks in this stack are signed with it by the test.
+      STRIPE_WEBHOOK_SECRET: whsec_e2e_not_a_real_secret
+      PLATFORM_FEE_BPS: "0"
     healthcheck:
       test:
         - CMD

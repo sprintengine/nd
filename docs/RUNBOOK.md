@@ -67,7 +67,7 @@ The backup scripts read `infra/.env` on every run; no restart needed.
 
 ### Application secrets (auth, Stripe, gateway shared secret)
 
-`AUTH_SECRET` and `STRIPE_SECRET_KEY` are in the API block of `infra/.env` and `GATEWAY_INTERNAL_SECRET` in the gateway block; the webhook signing secret arrives with payments (the "Coming with later features" block of `infra/.env.example`). Changing `AUTH_SECRET` signs every user out. Rotate by issuing the new value at the source (Stripe dashboard: roll the key or the webhook signing secret), updating `infra/.env`, and `dc up -d --wait`. Compose recreates only the services whose environment changed. The gateway shared secret is read by both apps, so both restart together; do it in the daytime (see "Upgrades" in DEPLOY.md).
+`AUTH_SECRET`, `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` are in the API block of `infra/.env` and `GATEWAY_INTERNAL_SECRET` in the gateway block. Changing `AUTH_SECRET` signs every user out. Rotate by issuing the new value at the source (Stripe dashboard: roll the key or the webhook signing secret), updating `infra/.env`, and `dc up -d --wait`. Compose recreates only the services whose environment changed. The gateway shared secret is read by both apps, so both restart together; do it in the daytime (see "Upgrades" in DEPLOY.md).
 
 ### A charger's OCPP key
 
