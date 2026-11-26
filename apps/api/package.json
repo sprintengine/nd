@@ -20,6 +20,7 @@
     "@fastify/helmet": "catalog:",
     "@fastify/rate-limit": "catalog:",
     "@fastify/swagger": "catalog:",
+    "@fastify/websocket": "catalog:",
     "@nd/config": "workspace:*",
     "@nd/db": "workspace:*",
     "@nd/domain": "workspace:*",
@@ -34,13 +35,18 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@nd/ocpp-core": "workspace:*",
+    "@nd/ocpp-gateway": "workspace:*",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
+    "@types/ws": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "eslint": "catalog:",
     "openapi-types": "catalog:",
+    "pino": "catalog:",
     "typescript": "catalog:",
     "undici": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "ws": "catalog:"
   }
 }

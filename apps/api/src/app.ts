@@ -2,6 +2,7 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import swagger from "@fastify/swagger";
+import websocket from "@fastify/websocket";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import {
   jsonSchemaTransform,
@@ -17,8 +18,12 @@ import { BOOKING_JOBS } from "./bookings/jobs.ts";
 import { COMPLIANCE_JOBS } from "./compliance/jobs.ts";
 import type { AppDeps } from "./deps.ts";
 import { HttpProblem, registerProblemHandlers } from "./http/problem.ts";
+import { changedBooking, createRealtimeFeed } from "./realtime/feed.ts";
+import { createRealtimeHub, DEFAULT_HUB_OPTIONS } from "./realtime/hub.ts";
+import { MAX_CLIENT_FRAME_BYTES, registerRealtimeRoute } from "./realtime/ws.ts";
 import { registerAccountDeletionRoutes } from "./routes/account-deletion.ts";
 import { registerBookingRoutes } from "./routes/bookings.ts";
+import { registerSessionRoutes } from "./routes/bookings-session.ts";
 import { registerChargerRoutes } from "./routes/chargers.ts";
 import { registerHostRoutes } from "./routes/hosts.ts";
 import { registerMeRoutes } from "./routes/me.ts";
@@ -26,6 +31,8 @@ import { registerPaymentMethodRoutes } from "./routes/payment-methods.ts";
 import { registerTaxDetailRoutes } from "./routes/tax-details.ts";
 import { registerStripeWebhook } from "./routes/webhooks.ts";
 import type { Services } from "./services.ts";
+import { SESSION_JOBS } from "./sessions/jobs.ts";
+import { DEFAULT_SESSION_TIMINGS, type SessionServices } from "./sessions/services.ts";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -140,6 +147,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     log: app.log,
   };
 
+  // Realtime: open WebSockets per user, fed by charger events and the API's own changes.
+  const hubOptions = { ...DEFAULT_HUB_OPTIONS, ...deps.realtime };
+  const hub = createRealtimeHub({ ...hubOptions, log: app.log });
+  const feed = createRealtimeFeed({ db: services.db, clock: deps.clock, hub, log: app.log });
+  const sessionServices: SessionServices = {
+    ...services,
+    chargerControl: deps.chargerControl,
+    sessionTimings: { ...DEFAULT_SESSION_TIMINGS, ...deps.sessionTimings },
+    realtime: feed,
+  };
+  void app.register(websocket, { options: { maxPayload: MAX_CLIENT_FRAME_BYTES } });
+
   void app.register((scope, _options, done) => {
     registerAuthRoutes(scope, auth, config.publicApiUrl);
     registerSession(scope, auth);
@@ -149,7 +168,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerAccountDeletionRoutes(scope, deps);
     registerChargerRoutes(scope, deps);
     registerHostRoutes(scope, deps);
+    // Tell connected apps about bookings the booking routes changed.
+    scope.addHook("onSend", (request, reply, payload, done) => {
+      const bookingId = changedBooking(
+        {
+          method: request.method,
+          url: request.routeOptions.url,
+          statusCode: reply.statusCode,
+          params: request.params,
+        },
+        payload,
+      );
+      if (bookingId !== undefined) feed.bookingChanged(bookingId);
+      done(null, payload);
+    });
     registerBookingRoutes(scope, services);
+    registerSessionRoutes(scope, sessionServices);
+    registerRealtimeRoute(scope, {
+      hub,
+      auth,
+      allowedOrigins: config.corsOrigins,
+      maxConnectionsPerUser: hubOptions.maxConnectionsPerUser,
+      heartbeatSeconds: Math.round(hubOptions.heartbeatMs / 1000),
+    });
     registerPaymentMethodRoutes(scope, services);
     registerStripeWebhook(scope, services, config.stripeWebhookSecret);
     registerTaxDetailRoutes(scope, deps);
@@ -158,11 +199,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   // Jobs run in this process: they start once the app is ready and stop,
   // letting running jobs finish, when it closes.
+  let unsubscribe: () => void = () => undefined;
   app.addHook("onReady", async () => {
-    await deps.jobs.start([...BOOKING_JOBS, ...COMPLIANCE_JOBS], services, app.log);
+    await deps.jobs.start(
+      [...BOOKING_JOBS, ...COMPLIANCE_JOBS, ...SESSION_JOBS],
+      sessionServices,
+      app.log,
+    );
+    unsubscribe = await deps.chargerEvents.subscribeAll((signal) => {
+      feed.handle(signal);
+    });
+  });
+  app.addHook("preClose", () => {
+    hub.close();
   });
   app.addHook("onClose", async () => {
+    unsubscribe();
     await deps.jobs.stop();
+    await feed.idle();
     await deps.chargerEvents.close();
   });
   return app;

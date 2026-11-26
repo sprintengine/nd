@@ -5,7 +5,9 @@ import type { FastifyServerOptions } from "fastify";
 import type { ApiConfig } from "./env.ts";
 import type { ChargerEvents } from "./events/charger-events.ts";
 import type { JobRunner } from "./jobs/jobs.ts";
+import type { RealtimeHubOptions } from "./realtime/hub.ts";
 import type { EmailSender, SmsSender } from "./senders/senders.ts";
+import type { SessionTimings } from "./sessions/services.ts";
 import type { StripePayments } from "./stripe/payments.ts";
 import type { StripeConnect } from "./stripe/stripe.ts";
 
@@ -34,6 +36,10 @@ export interface AppDeps {
   readonly jobs: JobRunner;
   readonly chargerControl: ChargerControl;
   readonly chargerEvents: ChargerEvents;
+  /** How long session control waits for chargers; defaults to the production timings. */
+  readonly sessionTimings?: Partial<SessionTimings>;
+  /** Realtime connection limits and heartbeat; defaults suit production. */
+  readonly realtime?: Partial<Omit<RealtimeHubOptions, "log">>;
   /** Fastify logger settings; `false` (the default) keeps tests quiet. */
   readonly logger?: FastifyServerOptions["logger"];
 }
