@@ -36,10 +36,13 @@ updates:
       github-actions:
         patterns: ["*"]
 
-  # Images in docker-compose.dev.yml. The CI service image in
-  # .github/workflows/ci.yml is kept in step by hand.
+  # Images in docker-compose.dev.yml and infra/compose*.yml. Kept in step by
+  # hand: the CI service image in .github/workflows/ci.yml, the tool images in
+  # .github/workflows/docker.yml and the aws-cli image in infra/backup-lib.sh.
   - package-ecosystem: docker-compose
-    directory: /
+    directories:
+      - /
+      - /infra
     schedule:
       interval: weekly
       day: monday
@@ -52,10 +55,11 @@ updates:
       docker-compose:
         patterns: ["*"]
 
-  # Dockerfiles for the deployable apps.
+  # Base images in the deployable apps' Dockerfiles.
   - package-ecosystem: docker
     directories:
-      - /apps/*
+      - /apps/api
+      - /apps/ocpp-gateway
     schedule:
       interval: weekly
       day: monday
