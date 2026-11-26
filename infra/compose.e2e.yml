@@ -50,6 +50,8 @@ services:
       # Not a real secret: webhooks in this stack are signed with it by the test.
       STRIPE_WEBHOOK_SECRET: whsec_e2e_not_a_real_secret
       PLATFORM_FEE_BPS: "0"
+      # No real user; the e2e stack has no support staff.
+      ADMIN_USER_IDS: e2e-support-placeholder
       # No messages leave the stack: console senders, which production
       # refuses unless ALLOW_CONSOLE_MESSAGES is true (and then redact).
       EMAIL_PROVIDER: console

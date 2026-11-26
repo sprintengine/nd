@@ -94,6 +94,7 @@ services:
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       PLATFORM_FEE_BPS: ${PLATFORM_FEE_BPS:-0}
+      ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
       # Email: smtp or resend. Sign-in links go out this way.
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:?set EMAIL_PROVIDER in infra/.env}
       EMAIL_FROM: ${EMAIL_FROM:-}
