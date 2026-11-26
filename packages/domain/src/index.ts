@@ -1,5 +1,6 @@
 export * from "./charger-control.ts";
 export * from "./charger-events.ts";
+export * from "./notifications.ts";
 export * from "./pricing.ts";
 export * from "./realtime.ts";
 export * from "./reconciliation.ts";
