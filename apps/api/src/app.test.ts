@@ -125,6 +125,8 @@ describe("OpenAPI", () => {
       "/hosts/chargers/{id}/onboarding",
       "/hosts/me/tax-details",
       "/me",
+      "/me/delete",
+      "/me/delete/cancel",
       "/me/payment-methods",
       "/me/payment-methods/default",
       "/me/payment-methods/setup-intent",

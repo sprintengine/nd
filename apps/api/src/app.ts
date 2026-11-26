@@ -16,6 +16,7 @@ import { registerSession } from "./auth/session.ts";
 import { BOOKING_JOBS } from "./bookings/jobs.ts";
 import type { AppDeps } from "./deps.ts";
 import { HttpProblem, registerProblemHandlers } from "./http/problem.ts";
+import { registerAccountDeletionRoutes } from "./routes/account-deletion.ts";
 import { registerBookingRoutes } from "./routes/bookings.ts";
 import { registerChargerRoutes } from "./routes/chargers.ts";
 import { registerHostRoutes } from "./routes/hosts.ts";
@@ -144,6 +145,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     scope.get("/healthz", { schema: { hide: true } }, () => ({ status: "ok" }));
     scope.get("/openapi.json", { schema: { hide: true } }, () => scope.swagger());
     registerMeRoutes(scope, deps);
+    registerAccountDeletionRoutes(scope, deps);
     registerChargerRoutes(scope, deps);
     registerHostRoutes(scope, deps);
     registerBookingRoutes(scope, services);

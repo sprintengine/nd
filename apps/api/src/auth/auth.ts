@@ -5,6 +5,7 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { phoneNumber } from "better-auth/plugins/phone-number";
 
+import { hasPendingDeletion } from "../accounts/deletion.ts";
 import type { IdGenerator } from "../deps.ts";
 import type { ApiConfig } from "../env.ts";
 import type { EmailSender, SmsSender } from "../senders/senders.ts";
@@ -130,6 +131,23 @@ export function createAuth({ config, db, ids, email, sms }: AuthDeps) {
       }),
     ],
     disabledPaths: DISABLED_PATHS,
+    databaseHooks: {
+      session: {
+        create: {
+          // An account waiting to be deleted cannot be signed in to; the
+          // emailed undo link (POST /me/delete/cancel) restores it.
+          before: async (session) => {
+            if (await hasPendingDeletion(db, session.userId)) {
+              throw new APIError("FORBIDDEN", {
+                message:
+                  "This account is scheduled for deletion. Use the link in the confirmation email to keep it.",
+                code: "ACCOUNT_DELETION_PENDING",
+              });
+            }
+          },
+        },
+      },
+    },
     hooks: {
       // A code verifies the signed-in user's number; it never signs anyone in.
       before: createAuthMiddleware((ctx) => {

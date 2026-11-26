@@ -95,6 +95,20 @@
           "requestId"
         ]
       },
+      "AccountDeletionScheduledInput": {
+        "type": "object",
+        "properties": {
+          "deletionDueAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "When the account is anonymised, unless the deletion is undone first"
+          }
+        },
+        "required": [
+          "deletionDueAt"
+        ]
+      },
       "BookingInput": {
         "type": "object",
         "properties": {
@@ -1297,6 +1311,21 @@
         ],
         "additionalProperties": false
       },
+      "AccountDeletionScheduled": {
+        "type": "object",
+        "properties": {
+          "deletionDueAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "When the account is anonymised, unless the deletion is undone first"
+          }
+        },
+        "required": [
+          "deletionDueAt"
+        ],
+        "additionalProperties": false
+      },
       "Booking": {
         "type": "object",
         "properties": {
@@ -2464,6 +2493,112 @@
             }
           },
           "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/delete": {
+      "post": {
+        "summary": "Delete your account",
+        "tags": [
+          "account"
+        ],
+        "description": "Schedules the account for deletion in 7 days and signs it out on every device at once. Until then it cannot be signed in to; the emailed link undoes the request (POST /me/delete/cancel). After that, personal data is removed; past bookings and payments are kept without it, for accounting. Refused (409, with reasons) while a booking is not finished or a payment is still owed.",
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountDeletionScheduled"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/delete/cancel": {
+      "post": {
+        "summary": "Undo an account deletion",
+        "tags": [
+          "account"
+        ],
+        "description": "Keeps an account scheduled for deletion, using the token from the link in the deletion email. Works until the deletion falls due; then sign in again as usual. Needs no session: the deletion request signed every device out.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "minLength": 20,
+                    "maxLength": 200,
+                    "description": "The token from the undo link in the deletion email"
+                  }
+                },
+                "required": [
+                  "token"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Deletion undone"
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
             "description": "Default Response",
             "content": {
               "application/json": {
