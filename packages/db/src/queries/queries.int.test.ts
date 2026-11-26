@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createMigratedDatabase, type MigratedDatabase } from "../../test/database.ts";
 import { insertBooking, insertCharger, insertUser, utcWindow } from "../../test/fixtures.ts";
-import { chargers, hosts, sessions } from "../schema/tables.ts";
+import { chargers, sessions } from "../schema/tables.ts";
 import { buildSeedData, seed } from "../seed.ts";
 import { bookingsInWindow, openTransactionForCharger } from "./bookings.ts";
 import { findChargerByChargeboxId, findChargerCredentials, findHostByUserId } from "./chargers.ts";
@@ -128,10 +128,6 @@ describe("charger and host helpers", () => {
       .update(chargers)
       .set({ ocppAuthHash: "hash-for-test" })
       .where(eq(chargers.chargeboxId, "seed-ranelagh"));
-    await database.db
-      .update(hosts)
-      .set({ tinEncrypted: "ciphertext-for-test" })
-      .where(eq(hosts.userId, "seed-user-aoife"));
 
     const charger = await findChargerByChargeboxId(database.db, "seed-ranelagh");
     expect(charger?.chargeboxId).toBe("seed-ranelagh");
@@ -139,8 +135,7 @@ describe("charger and host helpers", () => {
     expect(JSON.stringify(charger)).not.toContain("hash-for-test");
 
     const host = await findHostByUserId(database.db, "seed-user-aoife");
-    expect(host?.taxCountry).toBe("IE");
-    expect(host).not.toHaveProperty("tinEncrypted");
+    expect(host?.taxDetailsComplete).toBe(true);
 
     await expect(findChargerCredentials(database.db, "seed-ranelagh")).resolves.toMatchObject({
       ocppAuthHash: "hash-for-test",

@@ -11,6 +11,7 @@ import {
   OCPP_MESSAGE_TYPES,
   PAYMENT_STATUSES,
   SESSION_STATUSES,
+  TAX_ENTITY_TYPES,
   TRANSFER_HOLD_REASONS,
   TRANSFER_STATUSES,
 } from "@nd/domain";
@@ -33,3 +34,4 @@ export const ocppMessageDirection = pgEnum("ocpp_message_direction", OCPP_MESSAG
 export const ocppMessageType = pgEnum("ocpp_message_type", OCPP_MESSAGE_TYPES);
 export const devicePlatform = pgEnum("device_platform", DEVICE_PLATFORMS);
 export const currency = pgEnum("currency", CURRENCIES);
+export const taxEntityType = pgEnum("tax_entity_type", TAX_ENTITY_TYPES);

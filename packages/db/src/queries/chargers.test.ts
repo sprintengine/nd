@@ -9,7 +9,6 @@ import {
   findChargerByChargeboxId,
   findChargerCredentials,
   findHostByUserId,
-  HOST_SECRET_COLUMNS,
   hostColumns,
 } from "./chargers.ts";
 
@@ -20,8 +19,7 @@ describe("default select helpers", () => {
     expect(chargerColumns).toHaveProperty("location");
   });
 
-  it("leave out host secrets", () => {
-    for (const secret of HOST_SECRET_COLUMNS) expect(hostColumns).not.toHaveProperty(secret);
+  it("select every host column", () => {
     expect(hostColumns).toHaveProperty("taxDetailsComplete");
   });
 });

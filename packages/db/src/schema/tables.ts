@@ -2,7 +2,6 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
-  char,
   check,
   index,
   integer,
@@ -66,6 +65,8 @@ export const users = pgTable("users", {
   phone: text("phone").unique(),
   phoneVerified: boolean("phone_verified").notNull().default(false),
   stripeCustomerId: text("stripe_customer_id").unique(),
+  /** When the account was deleted: the row stays, anonymised, for accounting. */
+  deletedAt: timestamptz("deleted_at"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -81,10 +82,7 @@ export const hosts = pgTable(
       .references(() => users.id),
     stripeAccountId: text("stripe_account_id").unique(),
     payoutStatus: hostPayoutStatus("payout_status").notNull().default("not_started"),
-    /** ISO 3166-1 alpha-2 country of tax residence. */
-    taxCountry: char("tax_country", { length: 2 }),
-    /** Tax identification number, encrypted by the application. Secret. */
-    tinEncrypted: text("tin_encrypted"),
+    /** Set when `host_tax_details` holds a complete record; transfers are held until then. */
     taxDetailsComplete: boolean("tax_details_complete").notNull().default(false),
     /** Optional cheap night-rate window, in the charger's local time. */
     nightRateStart: time("night_rate_start"),
@@ -96,7 +94,6 @@ export const hosts = pgTable(
     updatedAt: updatedAt(),
   },
   (table) => [
-    check("hosts_tax_country_format", sql`${table.taxCountry} ~ '^[A-Z]{2}$'`),
     check("hosts_max_sessions_per_day_positive", sql`${table.maxSessionsPerDay} >= 1`),
     check(
       "hosts_cancellation_cutoff_range",

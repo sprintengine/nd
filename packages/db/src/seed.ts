@@ -109,13 +109,14 @@ export function buildSeedData(now: Date = new Date()): SeedData {
     },
   ];
 
+  // No host_tax_details rows: the seed cannot encrypt without the API's key.
+  // The flag alone lets payouts flow for the complete hosts in development.
   const seedHosts: Insert<typeof hosts>[] = [
     {
       id: hostIds.aoife,
       userId: userIds.aoife,
       stripeAccountId: "acct_seed_aoife",
       payoutStatus: "enabled",
-      taxCountry: "IE",
       taxDetailsComplete: true,
       nightRateStart: "23:00",
       nightRateEnd: "08:00",
@@ -125,7 +126,6 @@ export function buildSeedData(now: Date = new Date()): SeedData {
       userId: userIds.cian,
       stripeAccountId: "acct_seed_cian",
       payoutStatus: "enabled",
-      taxCountry: "IE",
       taxDetailsComplete: true,
     },
     {
@@ -133,7 +133,6 @@ export function buildSeedData(now: Date = new Date()): SeedData {
       userId: userIds.niamh,
       stripeAccountId: "acct_seed_niamh",
       payoutStatus: "pending",
-      taxCountry: "IE",
       taxDetailsComplete: false,
     },
   ];

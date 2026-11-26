@@ -16,17 +16,17 @@ function omit<T extends Record<string, unknown>, K extends keyof T & string>(
 /** Charger columns that must never appear in a default selection. */
 export const CHARGER_SECRET_COLUMNS = ["ocppAuthHash"] as const;
 
-/** Host columns that must never appear in a default selection. */
-export const HOST_SECRET_COLUMNS = ["tinEncrypted"] as const;
-
 /** Every charger column except secrets. Use with `db.select(chargerColumns)`. */
 export const chargerColumns = omit(getTableColumns(chargers), CHARGER_SECRET_COLUMNS);
 
-/** Every host column except secrets. Use with `db.select(hostColumns)`. */
-export const hostColumns = omit(getTableColumns(hosts), HOST_SECRET_COLUMNS);
+/**
+ * Every host column. Hosts hold no secrets: tax identity lives in
+ * `host_tax_details`, whose encrypted columns are read only by the API's tax module.
+ */
+export const hostColumns = getTableColumns(hosts);
 
 export type Charger = Omit<typeof chargers.$inferSelect, (typeof CHARGER_SECRET_COLUMNS)[number]>;
-export type Host = Omit<typeof hosts.$inferSelect, (typeof HOST_SECRET_COLUMNS)[number]>;
+export type Host = typeof hosts.$inferSelect;
 
 /** A charger by its OCPP ChargeboxID, without secrets. */
 export async function findChargerByChargeboxId(
@@ -65,7 +65,7 @@ export async function findChargerCredentials(
   return row;
 }
 
-/** A user's host profile, without the encrypted tax number. */
+/** A user's host profile. */
 export async function findHostByUserId(db: Executor, userId: string): Promise<Host | undefined> {
   const [row] = await db.select(hostColumns).from(hosts).where(eq(hosts.userId, userId)).limit(1);
   return row;
