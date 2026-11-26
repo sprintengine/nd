@@ -11,17 +11,24 @@
     "lint": "eslint .",
     "start": "node dist/main.js",
     "test": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc"
   },
   "dependencies": {
     "@nd/config": "workspace:*",
+    "@nd/db": "workspace:*",
+    "@nd/domain": "workspace:*",
     "@nd/ocpp-core": "workspace:*",
+    "drizzle-orm": "catalog:",
     "pg": "catalog:",
+    "pino": "catalog:",
+    "ws": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
+    "@types/ws": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "eslint": "catalog:",
     "typescript": "catalog:",

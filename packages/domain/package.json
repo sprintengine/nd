@@ -19,6 +19,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@nd/ocpp-core": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {

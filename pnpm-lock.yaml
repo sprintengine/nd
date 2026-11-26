@@ -57,6 +57,9 @@ catalogs:
     pg:
       specifier: 8.23.1
       version: 8.23.1
+    pino:
+      specifier: 10.4.0
+      version: 10.4.0
     prettier:
       specifier: 3.10.1
       version: 3.10.1
@@ -166,12 +169,27 @@ importers:
       '@nd/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@nd/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@nd/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@nd/ocpp-core':
         specifier: workspace:*
         version: link:../../packages/ocpp-core
+      drizzle-orm:
+        specifier: 'catalog:'
+        version: 0.45.4(@types/pg@8.23.1)(pg@8.23.1)
       pg:
         specifier: 'catalog:'
         version: 8.23.1
+      pino:
+        specifier: 'catalog:'
+        version: 10.4.0
+      ws:
+        specifier: 'catalog:'
+        version: 8.23.0
       zod:
         specifier: 'catalog:'
         version: 4.6.7
@@ -182,6 +200,9 @@ importers:
       '@types/pg':
         specifier: 'catalog:'
         version: 8.23.1
+      '@types/ws':
+        specifier: 'catalog:'
+        version: 8.18.2
       '@vitest/coverage-v8':
         specifier: 'catalog:'
         version: 5.1.2(vitest@5.1.2)
@@ -274,6 +295,9 @@ importers:
 
   packages/domain:
     dependencies:
+      '@nd/ocpp-core':
+        specifier: workspace:*
+        version: link:../ocpp-core
       zod:
         specifier: 'catalog:'
         version: 4.6.7
