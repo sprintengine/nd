@@ -32,6 +32,12 @@ describe("createGatewayServer", () => {
     expect(await response.json()).toEqual({ status: "ok", subprotocol: "ocpp1.6" });
   });
 
+  it("answers the readiness check", async () => {
+    const response = await fetch(`${baseUrl}/readyz`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "ok" });
+  });
+
   it("returns 404 for anything else", async () => {
     const response = await fetch(`${baseUrl}/nope`);
     expect(response.status).toBe(404);
