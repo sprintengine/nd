@@ -1,0 +1,6 @@
+# zizmor configuration: https://docs.zizmor.sh/configuration/
+rules:
+  # The self-repository `uses: $/...` form is not understood by actionlint
+  # yet. Keep `./.github/actions/...` until it is, then re-enable this audit.
+  self-repository:
+    disable: true
