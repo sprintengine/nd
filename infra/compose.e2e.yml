@@ -28,6 +28,11 @@ services:
       context: ..
       dockerfile: apps/api/Dockerfile
     image: nd-api:e2e
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      stripe-mock:
+        condition: service_started
     environment:
       DATABASE_URL: postgres://nd:nd@postgres:5432/nd
       # The image runs with NODE_ENV=production, which wants https and wss
@@ -37,6 +42,8 @@ services:
       CORS_ORIGINS: https://app.e2e.example.com
       OCPP_WSS_URL: wss://ocpp.e2e.example.com/v16/
       AUTH_SECRET: e2e-auth-secret-not-a-real-secret-0000
+      GATEWAY_INTERNAL_URL: http://ocpp-gateway:9100
+      GATEWAY_INTERNAL_SECRET: e2e-internal-secret-not-for-production-use
       # Host onboarding calls Stripe; stripe-mock accepts any sk_test_ key.
       STRIPE_SECRET_KEY: sk_test_e2e
       STRIPE_API_BASE_URL: http://stripe-mock:12111
@@ -58,6 +65,9 @@ services:
       context: ..
       dockerfile: apps/ocpp-gateway/Dockerfile
     image: nd-ocpp-gateway:e2e
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://nd:nd@postgres:5432/nd
       # Not a real secret: the internal ChargerControl endpoint's bearer token.
@@ -73,6 +83,24 @@ services:
       retries: 30
     ports:
       - "127.0.0.1:${E2E_GATEWAY_PORT:-19000}:9000"
+
+  # Applies the migrations once, before either app starts, the way an
+  # upgrade runs them in production (docs/DEPLOY.md).
+  migrate:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    image: nd-api:e2e
+    command: ["dist/migrate.js"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      DATABASE_URL: postgres://nd:nd@postgres:5432/nd
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   postgres:
     image: postgis/postgis:17-3.7@sha256:29619efaa36ece13e4e5abf69fe03f49b4f27f64ef01fc4c3f20b4f2228f7418

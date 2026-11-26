@@ -82,6 +82,9 @@ services:
       TRUST_PROXY_HOPS: "1"
       OCPP_WSS_URL: wss://ocpp.${DOMAIN:?set DOMAIN in infra/.env}/v16/
       AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in infra/.env}
+      # ChargerControl on the gateway's internal port, on the backend network only.
+      GATEWAY_INTERNAL_URL: http://ocpp-gateway:9100
+      GATEWAY_INTERNAL_SECRET: ${GATEWAY_INTERNAL_SECRET:?set GATEWAY_INTERNAL_SECRET in infra/.env}
       # Optional: the api treats an empty value as unset.
       APPLE_CLIENT_ID: ${APPLE_CLIENT_ID:-}
       APPLE_CLIENT_SECRET: ${APPLE_CLIENT_SECRET:-}
