@@ -57,6 +57,13 @@
       "when": 1795714014790,
       "tag": "0007_settlement",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795715554475,
+      "tag": "0008_notifications",
+      "breakpoints": true
     }
   ]
 }

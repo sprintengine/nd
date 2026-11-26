@@ -450,7 +450,7 @@ export const disputes = pgTable(
   ],
 );
 
-/** Push notification tokens; removed with their user. */
+/** Push notification tokens (FCM for iOS and Android, web push subscriptions); removed with their user. */
 export const deviceTokens = pgTable(
   "device_tokens",
   {
@@ -459,11 +459,21 @@ export const deviceTokens = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     platform: devicePlatform("platform").notNull(),
+    /** The FCM registration token, or a web push subscription's endpoint URL. */
     token: text("token").notNull().unique(),
+    /** A web push subscription's keys (base64url): the client's P-256 public key and auth secret. */
+    webPushP256dh: text("web_push_p256dh"),
+    webPushAuth: text("web_push_auth"),
     createdAt: createdAt(),
     lastSeenAt: timestamptz("last_seen_at").notNull().defaultNow(),
   },
-  (table) => [index("device_tokens_user_id_idx").on(table.userId)],
+  (table) => [
+    index("device_tokens_user_id_idx").on(table.userId),
+    check(
+      "device_tokens_web_push_keys",
+      sql`(${table.platform} = 'web') = (${table.webPushP256dh} is not null and ${table.webPushAuth} is not null)`,
+    ),
+  ],
 );
 
 /** Stripe webhook events already processed, so a redelivery is acknowledged and skipped. */
