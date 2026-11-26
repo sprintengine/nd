@@ -65,9 +65,9 @@ Revoke the old certificate in Cloudflare afterwards. The ocpp. certificate renew
 
 The backup scripts read `infra/.env` on every run; no restart needed.
 
-### Application secrets (Stripe, gateway shared secret)
+### Application secrets (auth, Stripe, gateway shared secret)
 
-Once those features land, their variables are in `infra/.env` (see the "Coming with later features" block of `infra/.env.example`). Rotate by issuing the new value at the source (Stripe dashboard: roll the key or the webhook signing secret), updating `infra/.env`, and `dc up -d --wait`. Compose recreates only the services whose environment changed. The gateway shared secret is read by both apps, so both restart together; do it in the daytime (see "Upgrades" in DEPLOY.md).
+`AUTH_SECRET` and `STRIPE_SECRET_KEY` are in the API block of `infra/.env`; the webhook signing secret and the gateway shared secret arrive with their features (the "Coming with later features" block of `infra/.env.example`). Changing `AUTH_SECRET` signs every user out. Rotate by issuing the new value at the source (Stripe dashboard: roll the key or the webhook signing secret), updating `infra/.env`, and `dc up -d --wait`. Compose recreates only the services whose environment changed. The gateway shared secret is read by both apps, so both restart together; do it in the daytime (see "Upgrades" in DEPLOY.md).
 
 ### A charger's OCPP key
 

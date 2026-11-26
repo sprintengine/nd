@@ -30,8 +30,14 @@ services:
     image: nd-api:e2e
     environment:
       DATABASE_URL: postgres://nd:nd@postgres:5432/nd
-      # For the Stripe client once payments land: stripe-mock accepts any
-      # sk_test_ key.
+      # The image runs with NODE_ENV=production, which wants https and wss
+      # URLs; nothing here resolves them, they only appear in responses.
+      PUBLIC_API_URL: https://api.e2e.example.com
+      PUBLIC_APP_URL: https://app.e2e.example.com
+      CORS_ORIGINS: https://app.e2e.example.com
+      OCPP_WSS_URL: wss://ocpp.e2e.example.com/v16/
+      AUTH_SECRET: e2e-auth-secret-not-a-real-secret-0000
+      # Host onboarding calls Stripe; stripe-mock accepts any sk_test_ key.
       STRIPE_SECRET_KEY: sk_test_e2e
       STRIPE_API_BASE_URL: http://stripe-mock:12111
     healthcheck:

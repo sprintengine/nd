@@ -73,6 +73,22 @@ services:
     image: ${ND_IMAGE_PREFIX:-ghcr.io/sprintengine}/nd-api:${ND_IMAGE_TAG:-main}
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-nd}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env}@postgres:5432/${POSTGRES_DB:-nd}
+      LOG_LEVEL: ${API_LOG_LEVEL:-info}
+      PUBLIC_API_URL: https://api.${DOMAIN:?set DOMAIN in infra/.env}
+      PUBLIC_APP_URL: https://app.${DOMAIN:?set DOMAIN in infra/.env}
+      CORS_ORIGINS: https://app.${DOMAIN:?set DOMAIN in infra/.env}
+      # Caddy is the one proxy in front of the api; it puts the client address
+      # (from CF-Connecting-IP, for Cloudflare's ranges only) in X-Forwarded-For.
+      TRUST_PROXY_HOPS: "1"
+      OCPP_WSS_URL: wss://ocpp.${DOMAIN:?set DOMAIN in infra/.env}/v16/
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in infra/.env}
+      # Optional: the api treats an empty value as unset.
+      APPLE_CLIENT_ID: ${APPLE_CLIENT_ID:-}
+      APPLE_CLIENT_SECRET: ${APPLE_CLIENT_SECRET:-}
+      APPLE_APP_BUNDLE_ID: ${APPLE_APP_BUNDLE_ID:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
     healthcheck:
       # /readyz also checks Postgres; the image's own HEALTHCHECK is liveness only.
       test:

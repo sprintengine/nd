@@ -155,7 +155,7 @@ Migrations ship inside the API image and run as a one-off container before the n
 docker compose -f infra/compose.yml run --rm api dist/migrate.js
 ```
 
-The image's entrypoint is `node`, so the argument is the script to run. The migration entry point arrives with the API's database wiring; until then there is nothing to migrate. Migrations must stay backwards compatible with the previous release (add, backfill, then remove in a later release), so a rollback never needs a down-migration.
+The image's entrypoint is `node`, so the argument is the script to run: `dist/migrate.js` applies every pending migration in one transaction, under an advisory lock, and exits. Run it before the first `up` too. Migrations must stay backwards compatible with the previous release (add, backfill, then remove in a later release), so a rollback never needs a down-migration.
 
 ## 5. Upgrades
 
