@@ -9,4 +9,10 @@ describe("createDb", () => {
     expect(typeof database.db.execute).toBe("function");
     await database.close();
   });
+
+  it("passes the pool size through", async () => {
+    const database = createDb("postgres://nobody:secret@127.0.0.1:1/none", { max: 3 });
+    expect(database.pool.options.max).toBe(3);
+    await database.close();
+  });
 });

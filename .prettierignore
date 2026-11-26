@@ -4,3 +4,4 @@ dist/
 coverage/
 .turbo/
 .cache/
+packages/db/drizzle/meta/
