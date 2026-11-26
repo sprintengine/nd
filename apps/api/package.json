@@ -9,14 +9,27 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "node --conditions=@nd/source --watch src/main.ts",
     "lint": "eslint .",
+    "migrate": "node --conditions=@nd/source src/migrate.ts",
     "start": "node dist/main.js",
     "test": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@fastify/cors": "catalog:",
+    "@fastify/helmet": "catalog:",
+    "@fastify/rate-limit": "catalog:",
+    "@fastify/swagger": "catalog:",
     "@nd/config": "workspace:*",
+    "@nd/db": "workspace:*",
+    "@nd/domain": "workspace:*",
+    "@node-rs/argon2": "catalog:",
+    "better-auth": "catalog:",
+    "drizzle-orm": "catalog:",
     "fastify": "catalog:",
+    "fastify-type-provider-zod": "catalog:",
     "pg": "catalog:",
+    "stripe": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -24,6 +37,7 @@
     "@types/pg": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "eslint": "catalog:",
+    "openapi-types": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }
