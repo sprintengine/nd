@@ -5,6 +5,7 @@ import {
   chargers,
   createDb,
   type Database,
+  hashChargerSecret,
   hosts,
   ocppMessages,
   runMigrations,
@@ -12,8 +13,6 @@ import {
 } from "@nd/db";
 import { CHARGER_EVENTS_CHANNEL, type ChargerEvent, parseChargerEvent } from "@nd/domain";
 import pg from "pg";
-
-import { hashChargerSecret } from "../src/secret.ts";
 
 // Integration test helpers: each test file gets its own migrated database on
 // the server at DATABASE_URL, dropped afterwards.

@@ -2,7 +2,7 @@ import { argon2Sync, randomBytes } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import { hashChargerSecret, parseArgon2Hash, verifyChargerSecret } from "./secret.ts";
+import { hashChargerSecret, parseArgon2Hash, verifyChargerSecret } from "./charger-secret.ts";
 
 const b64 = (bytes: Buffer) => bytes.toString("base64").replace(/=+$/, "");
 

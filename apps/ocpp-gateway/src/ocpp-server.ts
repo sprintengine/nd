@@ -1,6 +1,7 @@
 import { type IncomingMessage, type Server, STATUS_CODES } from "node:http";
 import type { Duplex } from "node:stream";
 
+import { verifyChargerSecret } from "@nd/db";
 import { OCPP16_SUBPROTOCOL, selectSubprotocol } from "@nd/ocpp-core";
 import { type RawData, type WebSocket, WebSocketServer } from "ws";
 
@@ -10,7 +11,6 @@ import { chargePointHandlers } from "./handlers.ts";
 import { chargeboxIdFromPath, parseBasicAuth } from "./http-auth.ts";
 import type { Logger } from "./logger.ts";
 import { ConnectionRegistry } from "./registry.ts";
-import { verifyChargerSecret } from "./secret.ts";
 import type { ChargerRef, GatewayStore } from "./store.ts";
 
 /** Close code for sockets the gateway closes on shutdown ("going away"). */

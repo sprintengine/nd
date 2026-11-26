@@ -1,9 +1,10 @@
 import { argon2 as argon2Callback, randomBytes, timingSafeEqual } from "node:crypto";
 
-// Per-charger OCPP Basic Auth secrets are stored as argon2 hashes in the
-// standard PHC string format, `$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>`
-// (unpadded base64), which every argon2 library reads and writes. Hashing and
-// verifying use Node's built-in argon2.
+// Per-charger OCPP Basic Auth secrets are stored in `chargers.ocpp_auth_hash`
+// as argon2 hashes in the standard PHC string format, `$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>`
+// (unpadded base64), which every argon2 library reads and writes. The API
+// hashes a secret when a host connects a charger; the gateway verifies it on
+// the WebSocket upgrade. Both use Node's built-in argon2.
 
 type Algorithm = "argon2id" | "argon2i" | "argon2d";
 
@@ -48,7 +49,7 @@ function argon2(
 
 const toB64 = (bytes: Buffer) => bytes.toString("base64").replace(/=+$/, "");
 
-/** Reads a PHC argon2 string. Returns undefined when it is not one this gateway can verify. */
+/** Reads a PHC argon2 string. Returns undefined when it is not one that can be verified. */
 export function parseArgon2Hash(encoded: string): ParsedHash | undefined {
   const match =
     /^\$(argon2id|argon2i|argon2d)\$v=19\$m=(\d+),t=(\d+),p=(\d+)\$([A-Za-z0-9+/]+)\$([A-Za-z0-9+/]+)$/.exec(

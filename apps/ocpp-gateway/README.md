@@ -13,7 +13,7 @@ The OCPP 1.6J central system. myenergi's cloud opens one WebSocket per Zappi to 
 
 The upgrade needs the `ocpp1.6` subprotocol (400 otherwise) and HTTP Basic Auth whose username is the ChargeboxID in the path and whose password matches the charger's argon2 hash: 401 for missing or wrong credentials (and for a charger with no hash yet), 404 for an unknown ChargeboxID. Nothing is stored for a refused upgrade. A second socket for a ChargeboxID replaces the first, which is closed with code 4000. Sockets are pinged every 30 s and cut off after a missed pong; on shutdown they are closed with 1001.
 
-Charger secrets are stored as standard PHC argon2 strings (`$argon2id$v=19$m=…,t=…,p=…$salt$hash`); `hashChargerSecret` in `src/secret.ts` writes them with Node's built-in argon2, and hashes from any other argon2 library verify.
+Charger secrets are stored as standard PHC argon2 strings (`$argon2id$v=19$m=…,t=…,p=…$salt$hash`); `hashChargerSecret` in `@nd/db` (shared with the API, which hashes the secret when a host connects a charger) writes them with Node's built-in argon2, and hashes from any other argon2 library verify.
 
 ## Environment
 

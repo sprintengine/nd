@@ -1,6 +1,7 @@
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
+import { hashChargerSecret } from "@nd/db";
 import { startZappiSim, type ZappiSim } from "@nd/ocpp-core/sim";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
@@ -11,7 +12,6 @@ import { ConfigWriteBudget } from "./boot-config.ts";
 import { createGatewayServer } from "./index.ts";
 import { attachOcppServer, type OcppServer, SHUTDOWN_CLOSE_CODE } from "./ocpp-server.ts";
 import { REPLACED_CLOSE_CODE } from "./registry.ts";
-import { hashChargerSecret } from "./secret.ts";
 
 const SECRET = "the-charger-secret";
 const CHARGEBOX = "21234567";
