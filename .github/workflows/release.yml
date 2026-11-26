@@ -1,0 +1,91 @@
+name: Release images
+
+# Publishes multi-arch images of every push to main to GHCR:
+#   ghcr.io/<owner>/nd-api and ghcr.io/<owner>/nd-ocpp-gateway
+# tagged `main` and `sha-<commit>`, with SBOM and provenance attestations.
+# Merging is not releasing: production runs whichever tag infra/.env names.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Let a publish finish, so `main` never points at a half-pushed image.
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Publish (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read # check out the code
+      packages: write # push the image to GHCR
+      id-token: write # sign the provenance attestation (Sigstore)
+      attestations: write # store the attestation
+      artifact-metadata: write # record the image as an artifact of this run
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [api, ocpp-gateway]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Image name
+        id: image
+        env:
+          OWNER: ${{ github.repository_owner }}
+          APP: ${{ matrix.app }}
+        # Registry paths must be lower case.
+        run: echo "name=ghcr.io/${OWNER,,}/nd-${APP}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=sha,format=long
+            type=raw,value=main
+
+      # No layer cache here: a release is built from scratch, so a poisoned
+      # cache entry from a pull request can never reach a published image.
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          build-args: |
+            VERSION=sha-${{ github.sha }}
+            REVISION=${{ github.sha }}
+          sbom: true
+          provenance: mode=max
+
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
