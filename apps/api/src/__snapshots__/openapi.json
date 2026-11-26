@@ -4185,7 +4185,7 @@
         "tags": [
           "hosts"
         ],
-        "description": "Stores the legal identity and tax identification number that EU (DAC7) and UK platform reporting need before a host's first payout, and marks the host's tax details complete. The TIN is checked against its country's format (a PPSN with its check letter for Ireland; a 10-digit UTR or a National Insurance number for the UK). The TIN and date of birth are encrypted at rest. Replaces any earlier details.",
+        "description": "Stores the legal identity and tax identification number that EU (DAC7) and UK platform reporting need before a host's first payout, marks the host's tax details complete and releases transfers held only for them. The TIN is checked against its country's format (a PPSN with its check letter for Ireland; a 10-digit UTR or a National Insurance number for the UK). The TIN and date of birth are encrypted at rest. Replaces any earlier details.",
         "requestBody": {
           "required": true,
           "content": {

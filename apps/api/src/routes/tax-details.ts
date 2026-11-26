@@ -10,8 +10,14 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 
 import { requireVerifiedPhone, sessionOf } from "../auth/session.ts";
+import { hostTransferJob } from "../bookings/jobs.ts";
 import { findHost } from "../data/hosts.ts";
-import { findTaxDetails, saveTaxDetails, type StoredTaxDetails } from "../data/tax-details.ts";
+import {
+  findTaxDetails,
+  paymentsHeldForTaxDetails,
+  saveTaxDetails,
+  type StoredTaxDetails,
+} from "../data/tax-details.ts";
 import type { AppDeps } from "../deps.ts";
 import { HttpProblem, problemResponses } from "../http/problem.ts";
 
@@ -146,7 +152,7 @@ const notFound = () =>
   );
 
 export function registerTaxDetailRoutes(app: FastifyInstance, deps: AppDeps): void {
-  const { database, config, clock } = deps;
+  const { database, config, clock, jobs } = deps;
   const db = database.db;
   const typed = app.withTypeProvider<ZodTypeProvider>();
 
@@ -186,7 +192,7 @@ export function registerTaxDetailRoutes(app: FastifyInstance, deps: AppDeps): vo
       schema: {
         summary: "Set your tax details",
         description:
-          "Stores the legal identity and tax identification number that EU (DAC7) and UK platform reporting need before a host's first payout, and marks the host's tax details complete. The TIN is checked against its country's format (a PPSN with its check letter for Ireland; a 10-digit UTR or a National Insurance number for the UK). The TIN and date of birth are encrypted at rest. Replaces any earlier details.",
+          "Stores the legal identity and tax identification number that EU (DAC7) and UK platform reporting need before a host's first payout, marks the host's tax details complete and releases transfers held only for them. The TIN is checked against its country's format (a PPSN with its check letter for Ireland; a 10-digit UTR or a National Insurance number for the UK). The TIN and date of birth are encrypted at rest. Replaces any earlier details.",
         tags: ["hosts"],
         body: putTaxDetailsBody,
         response: { 200: taxDetailsSchema, ...problemResponses(400, 401, 403, 503) },
@@ -239,6 +245,10 @@ export function registerTaxDetailRoutes(app: FastifyInstance, deps: AppDeps): vo
         tin: normalizedTin,
         tinMasked: maskTin(normalizedTin),
       });
+      // Transfers held only for these details can go now (or wait for the next reason).
+      for (const paymentId of await paymentsHeldForTaxDetails(db, host.id)) {
+        await jobs.send(hostTransferJob, { paymentId }, { singletonKey: paymentId });
+      }
       const row = await findTaxDetails(db, host.id);
       if (row === undefined) throw notFound();
       void reply.header("cache-control", "no-store");

@@ -51,6 +51,7 @@ beforeEach(() => {
   vi.mocked(hostData.findHost).mockResolvedValue(host);
   vi.mocked(taxData.findTaxDetails).mockResolvedValue(stored);
   vi.mocked(taxData.saveTaxDetails).mockResolvedValue();
+  vi.mocked(taxData.paymentsHeldForTaxDetails).mockResolvedValue([]);
 });
 
 afterEach(async () => {
@@ -110,6 +111,31 @@ describe("PUT /hosts/me/tax-details", () => {
         tinMasked: "*****67T",
       }),
     );
+  });
+
+  it("releases transfers held only for the tax details", async () => {
+    await app.close();
+    const unit = startUnitApp();
+    app = unit.app;
+    signInAs(app);
+    vi.mocked(taxData.paymentsHeldForTaxDetails).mockResolvedValueOnce([
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+    ]);
+    expect((await put(individual)).statusCode).toBe(200);
+    expect(taxData.paymentsHeldForTaxDetails).toHaveBeenCalledWith(expect.anything(), HOST_ID);
+    expect(unit.jobs.sent).toEqual([
+      {
+        name: "host-transfer",
+        payload: { paymentId: "11111111-1111-4111-8111-111111111111" },
+        options: { singletonKey: "11111111-1111-4111-8111-111111111111" },
+      },
+      {
+        name: "host-transfer",
+        payload: { paymentId: "22222222-2222-4222-8222-222222222222" },
+        options: { singletonKey: "22222222-2222-4222-8222-222222222222" },
+      },
+    ]);
   });
 
   it("normalizes a business's company number", async () => {
