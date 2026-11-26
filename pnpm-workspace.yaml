@@ -1,0 +1,12 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Every external dependency version lives here, so all workspaces use the same one.
+catalogMode: strict
+catalog:
+  "@types/node": 26.6.10
+  turbo: 2.11.13
+  typescript: 7.0.2
+
+engineStrict: true
