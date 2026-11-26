@@ -46,3 +46,9 @@ engineStrict: true
 # hooks; it skips CI and directories that are not git repositories.
 onlyBuiltDependencies:
   - lefthook
+
+# drizzle-kit (development only) still pulls in a deprecated loader that pins
+# esbuild 0.18, which has a moderate advisory (GHSA-67mh-4wv8-2f99). Force a
+# patched esbuild there; drizzle-kit's own commands are unaffected.
+overrides:
+  "@esbuild-kit/core-utils>esbuild": 0.25.12
