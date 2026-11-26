@@ -18,6 +18,10 @@ import { BOOKING_JOBS } from "./bookings/jobs.ts";
 import { COMPLIANCE_JOBS } from "./compliance/jobs.ts";
 import type { AppDeps } from "./deps.ts";
 import { HttpProblem, registerProblemHandlers } from "./http/problem.ts";
+import type { NotificationServices } from "./notifications/deliver.ts";
+import { notificationEventHandler } from "./notifications/events.ts";
+import { NOTIFICATION_JOBS } from "./notifications/jobs.ts";
+import { consolePushSender } from "./push/push.ts";
 import { changedBooking, createRealtimeFeed } from "./realtime/feed.ts";
 import { createRealtimeHub, DEFAULT_HUB_OPTIONS } from "./realtime/hub.ts";
 import { MAX_CLIENT_FRAME_BYTES, registerRealtimeRoute } from "./realtime/ws.ts";
@@ -26,6 +30,7 @@ import { registerAdminRoutes } from "./routes/admin.ts";
 import { registerBookingRoutes } from "./routes/bookings.ts";
 import { registerSessionRoutes } from "./routes/bookings-session.ts";
 import { registerChargerRoutes } from "./routes/chargers.ts";
+import { registerDeviceRoutes } from "./routes/devices.ts";
 import { registerHostSessionRoutes } from "./routes/host-sessions.ts";
 import { registerHostRoutes } from "./routes/hosts.ts";
 import { registerMeRoutes } from "./routes/me.ts";
@@ -163,6 +168,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     sessionTimings: { ...DEFAULT_SESSION_TIMINGS, ...deps.sessionTimings },
     realtime: feed,
   };
+  // Background jobs get everything above plus push notifications.
+  const jobServices: NotificationServices & SessionServices = {
+    ...sessionServices,
+    push: deps.push ?? consolePushSender(),
+  };
   void app.register(websocket, { options: { maxPayload: MAX_CLIENT_FRAME_BYTES } });
 
   void app.register((scope, _options, done) => {
@@ -174,6 +184,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerAccountDeletionRoutes(scope, deps);
     registerChargerRoutes(scope, deps);
     registerHostRoutes(scope, deps);
+    registerDeviceRoutes(scope, services);
     // Tell connected apps about bookings the booking routes changed.
     scope.addHook("onSend", (request, reply, payload, done) => {
       const bookingId = changedBooking(
@@ -210,17 +221,27 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // letting running jobs finish, when it closes.
   let unsubscribe: () => void = () => undefined;
   const settlementEvents = settlementEventHandler(sessionServices);
+  const notificationEvents = notificationEventHandler(services);
   app.addHook("onReady", async () => {
     await deps.jobs.start(
-      [...BOOKING_JOBS, ...COMPLIANCE_JOBS, ...SESSION_JOBS, ...SETTLEMENT_JOBS],
-      sessionServices,
+      [
+        ...BOOKING_JOBS,
+        ...COMPLIANCE_JOBS,
+        ...SESSION_JOBS,
+        ...SETTLEMENT_JOBS,
+        ...NOTIFICATION_JOBS,
+      ],
+      jobServices,
       app.log,
     );
-    // One listener feeds the realtime feed and settlement; handlers only queue work.
+    // One listener feeds the realtime feed, settlement and notifications; handlers only queue work.
     unsubscribe = await deps.chargerEvents.subscribeAll((signal) => {
       feed.handle(signal);
       settlementEvents.handle(signal).catch((error: unknown) => {
         app.log.error({ err: error }, "settlement event handler failed");
+      });
+      notificationEvents.handle(signal).catch((error: unknown) => {
+        app.log.error({ err: error }, "notification event handler failed");
       });
     });
   });

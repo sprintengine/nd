@@ -128,6 +128,11 @@ describe("POST /bookings", () => {
         payload: { bookingId: BOOKING_ID },
         options: { startAfter: new Date("2027-01-13T02:15:00Z"), singletonKey: BOOKING_ID },
       },
+      {
+        name: "notify",
+        payload: { type: "booking_created", bookingId: BOOKING_ID },
+        options: { singletonKey: `booking:${BOOKING_ID}:booking_created` },
+      },
     ]);
   });
 

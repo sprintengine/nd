@@ -21,6 +21,7 @@ import {
 } from "../data/sessions.ts";
 import { HttpProblem } from "../http/problem.ts";
 import type { JobAttempt } from "../jobs/jobs.ts";
+import { queueNotification } from "../notifications/queue.ts";
 import { remoteStartJob, startTimeoutJob, windowEndStopJob } from "./jobs.ts";
 import type { SessionServices } from "./services.ts";
 import { scheduledStartPending } from "./view.ts";
@@ -117,6 +118,7 @@ export async function arrive(
     { startAfter: windowEndStopAt(booking.slot.end), singletonKey: bookingId },
   );
   services.realtime.bookingChanged(bookingId);
+  await queueNotification(services, { type: "guest_arrived", bookingId });
   return arrivalOf(distanceM, now);
 }
 
@@ -131,7 +133,13 @@ async function failStart(
     status: "failed",
     stopReason: reason,
   });
-  if (changed) services.realtime.sessionChanged(bookingId);
+  if (changed) {
+    services.realtime.sessionChanged(bookingId);
+    // The driver stopped it themselves: nothing to tell them.
+    if (reason !== "stopped_before_start") {
+      await queueNotification(services, { type: "start_failed", bookingId, sessionId });
+    }
+  }
   return changed;
 }
 

@@ -21,6 +21,7 @@ import {
 import { chargerRules } from "../data/listing.ts";
 import { HttpProblem } from "../http/problem.ts";
 import type { JobAttempt } from "../jobs/jobs.ts";
+import { queueNotification } from "../notifications/queue.ts";
 import { captureForBooking, paymentKeys, releaseCardHold } from "../payments/settlement.ts";
 import type { Services } from "../services.ts";
 import { authoriseBookingJob, expireRequestJob, hostTransferJob, noShowJob } from "./jobs.ts";
@@ -255,6 +256,7 @@ export async function createBooking(services: Services, request: BookingRequest)
     });
   }
   await scheduleFollowUp(services, bookingId, status, window);
+  await queueNotification(services, { type: "booking_created", bookingId });
   return bookingId;
 }
 
@@ -292,6 +294,7 @@ export async function approveBooking(
   }
   if (!changed) throw notRequested();
   await scheduleFollowUp(services, bookingId, "confirmed", detail.booking.slot);
+  await queueNotification(services, { type: "booking_approved", bookingId });
 }
 
 /** The host turns a request down: the booking is cancelled and the authorisation released. */
@@ -311,6 +314,7 @@ export async function declineBooking(
     cancellationReason: reason ?? "declined",
   });
   if (!changed) throw notRequested();
+  await queueNotification(services, { type: "booking_declined", bookingId });
 }
 
 /**
@@ -379,6 +383,7 @@ export async function cancelBooking(
   if (!changed) {
     throw new HttpProblem(409, "cannot-cancel", "This booking can no longer be cancelled");
   }
+  await queueNotification(services, { type: "booking_cancelled", bookingId });
 }
 
 /**
@@ -400,6 +405,7 @@ export async function authoriseSavedCard(
   const paymentMethodId = payment.stripePaymentMethodId;
   if (customerId === null || paymentMethodId === null) {
     await cancelForPayment(services, bookingId, payment.id, "no_saved_card");
+    await queueNotification(services, { type: "booking_cancelled", bookingId });
     return;
   }
   let result;
@@ -433,6 +439,7 @@ export async function authoriseSavedCard(
     throw new Error(`authorising booking ${bookingId} was declined: ${result.reason}`);
   }
   await cancelForPayment(services, bookingId, payment.id, result.reason);
+  await queueNotification(services, { type: "booking_cancelled", bookingId });
 }
 
 /**
@@ -477,10 +484,11 @@ export async function expireRequest(services: Services, bookingId: string): Prom
   if (detail?.booking.status !== "requested") return;
   if (services.clock.now().getTime() < detail.booking.slot.start.getTime()) return;
   await releaseCardHold(services, bookingId, detail.payment);
-  await updateBookingFrom(services.db, bookingId, ["requested"], {
+  const changed = await updateBookingFrom(services.db, bookingId, ["requested"], {
     status: "cancelled",
     cancelledAt: services.clock.now(),
     cancelledBy: "system",
     cancellationReason: "host_did_not_respond",
   });
+  if (changed) await queueNotification(services, { type: "booking_expired", bookingId });
 }

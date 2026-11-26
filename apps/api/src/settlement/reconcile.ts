@@ -14,6 +14,7 @@ import {
   updateSessionFrom,
 } from "../data/settlement.ts";
 import type { JobAttempt } from "../jobs/jobs.ts";
+import { queueNotification } from "../notifications/queue.ts";
 import {
   captureForBooking,
   type CaptureResult,
@@ -110,6 +111,12 @@ export async function completeSettlement(
   services.realtime.sessionChanged(found.booking.id);
   const reloaded = await findSettlementSession(services.db, found.session.id);
   if (reloaded !== undefined) await ensureHostTransfer(services, reloaded);
+  // The host hears what they earned (once, whichever of this and the fallback comes first).
+  await queueNotification(services, {
+    type: "session_settled",
+    bookingId: found.booking.id,
+    sessionId: found.session.id,
+  });
 }
 
 /**

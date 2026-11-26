@@ -87,6 +87,11 @@ describe("arrive", () => {
         payload: { bookingId: BOOKING_ID },
         options: { startAfter: new Date("2027-01-13T02:05:00Z"), singletonKey: BOOKING_ID },
       },
+      {
+        name: "notify",
+        payload: { type: "guest_arrived", bookingId: BOOKING_ID },
+        options: { singletonKey: `booking:${BOOKING_ID}:guest_arrived` },
+      },
     ]);
     expect(t.realtime.booking).toEqual([BOOKING_ID]);
   });
@@ -241,7 +246,9 @@ describe("startCharging", () => {
     failedWith("no_response");
     await startCharging(t.services, DRIVER_ID, BOOKING_ID, undefined);
     failedWith("gateway_unreachable");
-    expect(t.jobs.sent).toEqual([]);
+    // Only the driver's "didn't start" notifications, one per failure (one job while queued).
+    expect(t.jobs.sent.map((job) => job.name)).toEqual(["notify", "notify", "notify"]);
+    expect(t.jobs.sent[0]?.payload).toMatchObject({ type: "start_failed", bookingId: BOOKING_ID });
     expect(t.realtime.session).toEqual([BOOKING_ID, BOOKING_ID, BOOKING_ID]);
   });
 

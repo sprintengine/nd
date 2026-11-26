@@ -13,6 +13,7 @@ import type {
   ChargerSignal,
 } from "../src/events/charger-events.ts";
 import { type AnyJob, type JobRunner, runAttempt, type SendOptions } from "../src/jobs/jobs.ts";
+import type { PushDevice, PushMessage, PushOutcome, PushSender } from "../src/push/push.ts";
 import type { EmailMessage, EmailSender, SmsMessage, SmsSender } from "../src/senders/senders.ts";
 import type { SavedCard, StripePayments } from "../src/stripe/payments.ts";
 import type { StripeConnect } from "../src/stripe/stripe.ts";
@@ -326,5 +327,33 @@ export function fakePayments() {
     state,
     cards,
     callsTo: (method: keyof StripePayments) => calls.filter((call) => call.method === method),
+  };
+}
+
+/**
+ * A push transport that records every push and answers `sent`, or the
+ * outcome a test sets for a token (`invalid_token`, a failure).
+ */
+export function recordingPush() {
+  const sent: { device: PushDevice; message: PushMessage }[] = [];
+  const outcomes = new Map<string, PushOutcome>();
+  const push: PushSender = {
+    name: "recording",
+    send: (devices, message) =>
+      Promise.resolve(
+        devices.map((device) => {
+          const outcome = outcomes.get(device.token) ?? { status: "sent" };
+          if (outcome.status === "sent") sent.push({ device, message });
+          return outcome;
+        }),
+      ),
+  };
+  return {
+    push,
+    sent,
+    /** What pushes to `token` answer from now on. */
+    answer(token: string, outcome: PushOutcome) {
+      outcomes.set(token, outcome);
+    },
   };
 }

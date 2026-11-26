@@ -37,6 +37,7 @@ export async function startHarness(
     chargerControl?: ChargerControl;
     sessionTimings?: Partial<SessionTimings>;
     realtime?: AppDeps["realtime"];
+    push?: AppDeps["push"];
   } = {},
 ): Promise<Harness> {
   const database = await createTestDatabase();
@@ -63,6 +64,7 @@ export async function startHarness(
     chargerEvents: createPgChargerEvents(database.url),
     ...(options.sessionTimings === undefined ? {} : { sessionTimings: options.sessionTimings }),
     ...(options.realtime === undefined ? {} : { realtime: options.realtime }),
+    ...(options.push === undefined ? {} : { push: options.push }),
   });
   await app.ready();
   return {

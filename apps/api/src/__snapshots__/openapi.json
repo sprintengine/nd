@@ -708,6 +708,58 @@
           "location"
         ]
       },
+      "DeviceInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "platform": {
+            "type": "string",
+            "enum": ["ios", "android", "web"]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": ["id", "platform", "createdAt"]
+      },
+      "NotificationPreferencesInput": {
+        "type": "object",
+        "properties": {
+          "bookingRequests": {
+            "type": "boolean"
+          },
+          "guestArrivals": {
+            "type": "boolean"
+          },
+          "sessionUpdates": {
+            "type": "boolean"
+          },
+          "chargerAlerts": {
+            "type": "boolean"
+          },
+          "bookingUpdates": {
+            "type": "boolean"
+          },
+          "chargingUpdates": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bookingRequests",
+          "guestArrivals",
+          "sessionUpdates",
+          "chargerAlerts",
+          "bookingUpdates",
+          "chargingUpdates"
+        ],
+        "description": "Hosts: bookingRequests (new requests and bookings, cancellations), guestArrivals, sessionUpdates (started; ended, with the amount billed and earned), chargerAlerts (offline, fault). Drivers: bookingUpdates (approved, declined, expired, cancelled) and chargingUpdates (started, stopped, failed to start)."
+      },
       "HostOnboardingLinkInput": {
         "type": "object",
         "properties": {
@@ -2152,6 +2204,60 @@
           "location"
         ],
         "additionalProperties": false
+      },
+      "Device": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "platform": {
+            "type": "string",
+            "enum": ["ios", "android", "web"]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": ["id", "platform", "createdAt"],
+        "additionalProperties": false
+      },
+      "NotificationPreferences": {
+        "type": "object",
+        "properties": {
+          "bookingRequests": {
+            "type": "boolean"
+          },
+          "guestArrivals": {
+            "type": "boolean"
+          },
+          "sessionUpdates": {
+            "type": "boolean"
+          },
+          "chargerAlerts": {
+            "type": "boolean"
+          },
+          "bookingUpdates": {
+            "type": "boolean"
+          },
+          "chargingUpdates": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bookingRequests",
+          "guestArrivals",
+          "sessionUpdates",
+          "chargerAlerts",
+          "bookingUpdates",
+          "chargingUpdates"
+        ],
+        "additionalProperties": false,
+        "description": "Hosts: bookingRequests (new requests and bookings, cancellations), guestArrivals, sessionUpdates (started; ended, with the amount billed and earned), chargerAlerts (offline, fault). Drivers: bookingUpdates (approved, declined, expired, cancelled) and chargingUpdates (started, stopped, failed to start)."
       },
       "HostOnboardingLink": {
         "type": "object",
@@ -3661,6 +3767,274 @@
             }
           },
           "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/devices": {
+      "post": {
+        "summary": "Register a device for push notifications",
+        "tags": ["notifications"],
+        "description": "iOS and Android send their FCM registration token; the web app sends its push subscription. A token already registered (by this account or another signed in on the same device) is moved to the caller and refreshed: 201 when new, 200 when known. Each account keeps its 10 most recently seen devices.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "platform": {
+                        "type": "string",
+                        "enum": ["ios", "android"]
+                      },
+                      "token": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^\\S+$",
+                        "description": "The FCM registration token (iOS devices register through FCM too)"
+                      }
+                    },
+                    "required": ["platform", "token"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "platform": {
+                        "type": "string",
+                        "enum": ["web"]
+                      },
+                      "subscription": {
+                        "type": "object",
+                        "properties": {
+                          "endpoint": {
+                            "type": "string",
+                            "maxLength": 2048,
+                            "format": "uri"
+                          },
+                          "keys": {
+                            "type": "object",
+                            "properties": {
+                              "p256dh": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "pattern": "^[A-Za-z0-9_-]+=*$"
+                              },
+                              "auth": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64,
+                                "pattern": "^[A-Za-z0-9_-]+=*$"
+                              }
+                            },
+                            "required": ["p256dh", "auth"]
+                          }
+                        },
+                        "required": ["endpoint", "keys"],
+                        "description": "The browser's PushSubscription, as `subscription.toJSON()` gives it"
+                      }
+                    },
+                    "required": ["platform", "subscription"]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Device"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Device"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/devices/{id}": {
+      "delete": {
+        "summary": "Stop push notifications to a device",
+        "tags": ["notifications"],
+        "description": "Call on sign-out. Another account's device is 404.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Default Response"
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/notification-preferences": {
+      "get": {
+        "summary": "Notification switches",
+        "tags": ["notifications"],
+        "description": "Every switch is on until the user turns it off.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferences"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Change notification switches",
+        "tags": ["notifications"],
+        "description": "Changes only the switches sent; answers all of them.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "bookingRequests": {
+                    "type": "boolean"
+                  },
+                  "guestArrivals": {
+                    "type": "boolean"
+                  },
+                  "sessionUpdates": {
+                    "type": "boolean"
+                  },
+                  "chargerAlerts": {
+                    "type": "boolean"
+                  },
+                  "bookingUpdates": {
+                    "type": "boolean"
+                  },
+                  "chargingUpdates": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferences"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
             "description": "Default Response",
             "content": {
               "application/json": {
