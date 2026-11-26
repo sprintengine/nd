@@ -41,7 +41,7 @@ function app() {
   typed.get(
     "/validated",
     { schema: { querystring: z.object({ n: z.coerce.number().int(), word: z.string().min(3) }) } },
-    (request) => request.query,
+    () => ({ ok: true }),
   );
   return server;
 }
@@ -100,6 +100,17 @@ describe("problem responses", () => {
     const response = await app().inject({ method: "GET", url: "/nowhere" });
     expect(response.statusCode).toBe(404);
     expect(response.json()).toMatchObject({ code: "not-found", instance: "/nowhere" });
+  });
+
+  it("answers markup in the request as JSON data, never as HTML", async () => {
+    const markup = "/%3Cscript%3Ealert(1)%3C%2Fscript%3E";
+    const notFound = await app().inject({ method: "GET", url: markup });
+    const invalid = await app().inject({ method: "GET", url: `/validated?n=x&word=${markup}` });
+    for (const response of [notFound, invalid]) {
+      expect(response.headers["content-type"]).toBe("application/problem+json; charset=utf-8");
+      expect(response.body).not.toMatch(/<script/i);
+    }
+    expect(notFound.json()).toMatchObject({ instance: markup });
   });
 });
 
