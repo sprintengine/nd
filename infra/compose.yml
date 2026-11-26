@@ -95,6 +95,10 @@ services:
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       PLATFORM_FEE_BPS: ${PLATFORM_FEE_BPS:-0}
       ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
+      # Durations; leave them at the defaults in production.
+      SESSION_START_TIMEOUT_SECONDS: ${SESSION_START_TIMEOUT_SECONDS:-120}
+      STALE_SESSION_GRACE_MINUTES: ${STALE_SESSION_GRACE_MINUTES:-10}
+      MIN_BOOKING_MINUTES: ${MIN_BOOKING_MINUTES:-30}
       # Email: smtp or resend. Sign-in links go out this way.
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:?set EMAIL_PROVIDER in infra/.env}
       EMAIL_FROM: ${EMAIL_FROM:-}
