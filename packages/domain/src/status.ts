@@ -59,6 +59,25 @@ export const OPEN_SESSION_STATUSES = [
   "suspended_evse",
 ] as const satisfies readonly SessionStatus[];
 
+/**
+ * Why a stopped session waits for a person before it is billed:
+ * `meter_mismatch` (the meter delta and the last MeterValue disagree),
+ * `meter_invalid` (no usable stop reading), `missing_stop` (no
+ * StopTransaction; closed from the last MeterValue), `no_authorisation` (no
+ * card authorisation to capture), `capture_failed` (the capture kept failing)
+ * and `host_dispute` (the host disputed a session closed without a stop).
+ */
+export const SESSION_REVIEW_REASONS = [
+  "meter_mismatch",
+  "meter_invalid",
+  "missing_stop",
+  "no_authorisation",
+  "capture_failed",
+  "host_dispute",
+] as const;
+export type SessionReviewReason = (typeof SESSION_REVIEW_REASONS)[number];
+export const sessionReviewReasonSchema = z.enum(SESSION_REVIEW_REASONS);
+
 /** Connection state of a charger as the gateway last saw it. */
 export const CHARGER_STATUSES = ["onboarding", "online", "offline", "faulted"] as const;
 export type ChargerStatus = (typeof CHARGER_STATUSES)[number];

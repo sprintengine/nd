@@ -5,7 +5,9 @@ import {
   AUTHORISE_NOW_HORIZON_DAYS,
   billableMinutes,
   billedAmount,
+  billingBreakdown,
   cancellationFee,
+  centsPerKwh,
   divideRoundHalfEven,
   hostShare,
   minutesCost,
@@ -222,5 +224,52 @@ describe("noShowAt", () => {
   it("is 15 minutes after the slot ends", () => {
     expect(noShowAt(START)).toEqual(at("2027-01-11T22:15:00Z"));
     expect(() => noShowAt(new Date(Number.NaN))).toThrow(RangeError);
+  });
+});
+
+describe("billingBreakdown", () => {
+  it("shows 3 h 39 min at 250 cents an hour billed as 3 h 40 min, under a 4-hour quote", () => {
+    const stop = minutesAfter(START, 219);
+    const breakdown = billingBreakdown(START, stop, 250, 1000);
+    expect(breakdown).toEqual({
+      actualMinutes: 219,
+      billedMinutes: 220,
+      timeCostCents: 917,
+      capped: false,
+      amountCents: 917,
+    });
+    expect(breakdown.amountCents).toBe(billedAmount(START, stop, 250, 1000));
+  });
+
+  it("notes when the quote caps the amount", () => {
+    const breakdown = billingBreakdown(START, minutesAfter(START, 241), 250, 1000);
+    expect(breakdown).toMatchObject({ billedMinutes: 245, timeCostCents: 1021, capped: true });
+    expect(breakdown.amountCents).toBe(1000);
+  });
+
+  it("rounds part of a minute up", () => {
+    const stop = new Date(START.getTime() + 61_000);
+    expect(billingBreakdown(START, stop, 600, 1000)).toMatchObject({
+      actualMinutes: 2,
+      billedMinutes: 5,
+      amountCents: 50,
+    });
+  });
+});
+
+describe("centsPerKwh", () => {
+  it("divides the amount by the energy delivered", () => {
+    expect(centsPerKwh(917, 22_500)).toBe(41);
+    expect(centsPerKwh(1000, 1000)).toBe(1000);
+  });
+
+  it("is undefined when nothing was delivered", () => {
+    expect(centsPerKwh(917, 0)).toBeUndefined();
+  });
+
+  it("refuses negative or fractional energy", () => {
+    expect(() => centsPerKwh(917, -1)).toThrow(RangeError);
+    expect(() => centsPerKwh(917, 1.5)).toThrow(RangeError);
+    expect(() => centsPerKwh(-1, 100)).toThrow(RangeError);
   });
 });

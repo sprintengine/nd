@@ -27,7 +27,9 @@ import {
   OPEN_SESSION_STATUSES,
   PAYMENT_STATUSES,
   paymentStatusSchema,
+  SESSION_REVIEW_REASONS,
   SESSION_STATUSES,
+  sessionReviewReasonSchema,
   sessionStatusSchema,
   SLOT_HOLDING_BOOKING_STATUSES,
   TERMINAL_BOOKING_STATUSES,
@@ -40,6 +42,7 @@ import {
 const vocabularies: [string, readonly string[], z.ZodType][] = [
   ["booking status", BOOKING_STATUSES, bookingStatusSchema],
   ["session status", SESSION_STATUSES, sessionStatusSchema],
+  ["session review reason", SESSION_REVIEW_REASONS, sessionReviewReasonSchema],
   ["charger status", CHARGER_STATUSES, chargerStatusSchema],
   ["connector type", CONNECTOR_TYPES, connectorTypeSchema],
   ["payment status", PAYMENT_STATUSES, paymentStatusSchema],

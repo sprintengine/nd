@@ -16,15 +16,34 @@ export const BOOKING_TRANSITIONS = {
 } as const satisfies Record<BookingStatus, readonly BookingStatus[]>;
 
 /**
- * The statuses a session may move to from each status. An open session goes
- * to `needs_review` when its StopTransaction never arrives and a job closes it
- * from the last meter value.
+ * The statuses a session may move to from each status. When StopTransaction
+ * never arrives, a job closes an open session from its last meter value and
+ * it waits for the host (`needs_host_confirmation`), or for support
+ * (`needs_review`) when there is no meter value to close it from.
  */
 export const SESSION_TRANSITIONS = {
   starting: ["charging", "failed"],
-  charging: ["suspended_ev", "suspended_evse", "stopped", "needs_review"],
-  suspended_ev: ["charging", "suspended_evse", "stopped", "needs_review"],
-  suspended_evse: ["charging", "suspended_ev", "stopped", "needs_review"],
+  charging: [
+    "suspended_ev",
+    "suspended_evse",
+    "stopped",
+    "needs_review",
+    "needs_host_confirmation",
+  ],
+  suspended_ev: [
+    "charging",
+    "suspended_evse",
+    "stopped",
+    "needs_review",
+    "needs_host_confirmation",
+  ],
+  suspended_evse: [
+    "charging",
+    "suspended_ev",
+    "stopped",
+    "needs_review",
+    "needs_host_confirmation",
+  ],
   stopped: ["reconciled", "needs_review", "needs_host_confirmation"],
   needs_host_confirmation: ["reconciled", "needs_review"],
   needs_review: ["reconciled"],

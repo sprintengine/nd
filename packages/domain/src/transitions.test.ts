@@ -55,6 +55,10 @@ describe("session transitions", () => {
     ["suspended_ev", "stopped"],
     ["stopped", "reconciled"],
     ["needs_review", "reconciled"],
+    ["charging", "needs_host_confirmation"],
+    ["suspended_ev", "needs_host_confirmation"],
+    ["needs_host_confirmation", "reconciled"],
+    ["needs_host_confirmation", "needs_review"],
   ] as const)("allow %s -> %s", (from, to) => {
     expect(canTransitionSession(from, to)).toBe(true);
   });
@@ -64,6 +68,8 @@ describe("session transitions", () => {
     ["stopped", "charging"],
     ["reconciled", "needs_review"],
     ["failed", "starting"],
+    ["starting", "needs_host_confirmation"],
+    ["needs_review", "stopped"],
   ] as const)("refuse %s -> %s", (from, to) => {
     expect(canTransitionSession(from, to)).toBe(false);
   });

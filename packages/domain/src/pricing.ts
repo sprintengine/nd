@@ -212,3 +212,50 @@ export function noShowAt(slotEnd: Date): Date {
   assertDate("slotEnd", slotEnd);
   return new Date(slotEnd.getTime() + NO_SHOW_GRACE_MINUTES * MINUTE_MS);
 }
+
+/** How a session's amount was arrived at, for a receipt. */
+export interface BillingBreakdown {
+  /** Whole minutes from start to stop, rounded up. */
+  readonly actualMinutes: number;
+  /** Minutes billed: the actual minutes rounded up to the billing increment. */
+  readonly billedMinutes: number;
+  /** The billed minutes at the hourly price, before the cap. */
+  readonly timeCostCents: number;
+  /** Whether the quote capped the amount. */
+  readonly capped: boolean;
+  /** What the driver pays; equal to {@link billedAmount}. */
+  readonly amountCents: number;
+}
+
+/** {@link billedAmount} with its working: the minutes billed, their cost and whether the quote capped it. */
+export function billingBreakdown(
+  start: Date,
+  stop: Date,
+  pricePerHourCents: number,
+  quoteCents: number,
+): BillingBreakdown {
+  const amountCents = billedAmount(start, stop, pricePerHourCents, quoteCents);
+  const ms = stop.getTime() - start.getTime();
+  const billedMinutes = billableMinutes(ms / MINUTE_MS);
+  const timeCostCents = minutesCost(billedMinutes, pricePerHourCents);
+  return {
+    actualMinutes: Math.ceil(ms / MINUTE_MS),
+    billedMinutes,
+    timeCostCents,
+    capped: timeCostCents > amountCents,
+    amountCents,
+  };
+}
+
+/**
+ * What the energy delivered cost per kWh, in cents rounded half to even, for
+ * comparison only (billing is by time). Undefined when nothing was delivered.
+ */
+export function centsPerKwh(amountCents: number, deliveredWh: number): number | undefined {
+  assertCents("amountCents", amountCents);
+  if (!Number.isSafeInteger(deliveredWh) || deliveredWh < 0) {
+    throw new RangeError(`deliveredWh must be a non-negative integer, got ${String(deliveredWh)}`);
+  }
+  if (deliveredWh === 0) return undefined;
+  return divideRoundHalfEven(amountCents * 1000, deliveredWh);
+}
