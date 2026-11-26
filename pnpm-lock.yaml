@@ -21,6 +21,9 @@ catalogs:
     '@types/pg':
       specifier: 8.23.1
       version: 8.23.1
+    '@types/ws':
+      specifier: 8.18.2
+      version: 8.18.2
     '@vitest/coverage-v8':
       specifier: 5.1.2
       version: 5.1.2
@@ -69,6 +72,9 @@ catalogs:
     vitest:
       specifier: 5.1.2
       version: 5.1.2
+    ws:
+      specifier: 8.23.0
+      version: 8.23.0
     zod:
       specifier: 4.6.7
       version: 4.6.7
@@ -264,6 +270,13 @@ importers:
         version: 5.1.2(@types/node@26.6.10)(@vitest/coverage-v8@5.1.2)(vite@8.3.8(@types/node@26.6.10)(jiti@2.7.0)(yaml@2.9.1))
 
   packages/ocpp-core:
+    dependencies:
+      ws:
+        specifier: 'catalog:'
+        version: 8.23.0
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
     devDependencies:
       '@nd/config':
         specifier: workspace:*
@@ -271,6 +284,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.10
+      '@types/ws':
+        specifier: 'catalog:'
+        version: 8.18.2
       '@vitest/coverage-v8':
         specifier: 'catalog:'
         version: 5.1.2(vitest@5.1.2)
@@ -925,6 +941,9 @@ packages:
 
   '@types/pg@8.23.1':
     resolution: {integrity: sha512-fKVHpikPdg4GKks3JuLEhvwSyvwzF23hnabPy6DD8ljVbC7+6J5dQzdv4arV6jqq57djnMgs1HKBxX4P8aBI3A==}
+
+  '@types/ws@8.18.2':
+    resolution: {integrity: sha512-67MQl+fpWKVTT1NYdnmo3U4sc/xPo/zQBncVnI74qmQa0z/b+1g6iYqNmGCPbxO+zz2aklb08a0oHfegiVd0/w==}
 
   '@typescript-eslint/eslint-plugin@8.74.0':
     resolution: {integrity: sha512-z3KXk1+Vm+d82ZRplOoC89ho4Rf1da5ju6sx8//92GnN532U62DGPjECXkkVqtYzIv0zoJlpO39SX2Z9tk6LVw==}
@@ -2259,6 +2278,18 @@ packages:
     resolution: {integrity: sha512-42AtmgqjV+X1VpdOfyTGOYRi0/zsoLqtXQckTmqTeybT+BDIbM/Guxo7x3pE2vtpr1ok6xRqM9OpBe+Jyoqyww==}
     engines: {node: '>=18'}
 
+  ws@8.23.0:
+    resolution: {integrity: sha512-wCkmX8QMOrKjgO8HW2WyDbTSGeqkocxgDzS9iR79rEAexty6/2qzilx3Ag8Tqf9ykop3irLKle0MtVn5qjVnoQ==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   xtend@4.0.2:
     resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}
     engines: {node: '>=0.4'}
@@ -2806,6 +2837,10 @@ snapshots:
       '@types/node': 26.6.10
       pg-protocol: 1.16.1
       pg-types: 2.2.0
+
+  '@types/ws@8.18.2':
+    dependencies:
+      '@types/node': 26.6.10
 
   '@typescript-eslint/eslint-plugin@8.74.0(@typescript-eslint/parser@8.74.0(@typescript/typescript6@6.0.2)(eslint@10.15.0(jiti@2.7.0)))(@typescript/typescript6@6.0.2)(eslint@10.15.0(jiti@2.7.0))':
     dependencies:
@@ -3950,6 +3985,8 @@ snapshots:
       ansi-styles: 6.2.3
       string-width: 7.2.0
       strip-ansi: 7.2.0
+
+  ws@8.23.0: {}
 
   xtend@4.0.2: {}
 
