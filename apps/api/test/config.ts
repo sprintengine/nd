@@ -1,4 +1,8 @@
 import type { ApiConfig } from "../src/env.ts";
+import { parseTaxKeyring } from "../src/tax/crypto.ts";
+
+/** A fixed key for tests only. */
+export const TEST_TAX_KEYS = `test-1:${Buffer.alloc(32, 7).toString("base64")}`;
 
 /** Settings for tests: plain http on localhost, no auth rate limit, short onboarding waits. */
 export function testConfig(overrides: Partial<ApiConfig> = {}): ApiConfig {
@@ -19,6 +23,7 @@ export function testConfig(overrides: Partial<ApiConfig> = {}): ApiConfig {
     onboardingWaitMaxSeconds: 5,
     stripeWebhookSecret: "whsec_test_secret",
     platformFeeBps: 0,
+    taxKeys: parseTaxKeyring(TEST_TAX_KEYS),
     ...overrides,
   };
 }

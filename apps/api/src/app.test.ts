@@ -123,6 +123,7 @@ describe("OpenAPI", () => {
       "/hosts/chargers",
       "/hosts/chargers/{id}",
       "/hosts/chargers/{id}/onboarding",
+      "/hosts/me/tax-details",
       "/me",
       "/me/payment-methods",
       "/me/payment-methods/default",

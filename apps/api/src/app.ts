@@ -21,6 +21,7 @@ import { registerChargerRoutes } from "./routes/chargers.ts";
 import { registerHostRoutes } from "./routes/hosts.ts";
 import { registerMeRoutes } from "./routes/me.ts";
 import { registerPaymentMethodRoutes } from "./routes/payment-methods.ts";
+import { registerTaxDetailRoutes } from "./routes/tax-details.ts";
 import { registerStripeWebhook } from "./routes/webhooks.ts";
 import type { Services } from "./services.ts";
 
@@ -44,6 +45,8 @@ export const REDACTED_LOG_PATHS = [
   "*.accessToken",
   "*.refreshToken",
   "*.idToken",
+  "*.tin",
+  "*.dateOfBirth",
 ];
 
 /** A client may send its own request id if it is short and plain; otherwise one is made. */
@@ -146,6 +149,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerBookingRoutes(scope, services);
     registerPaymentMethodRoutes(scope, services);
     registerStripeWebhook(scope, services, config.stripeWebhookSecret);
+    registerTaxDetailRoutes(scope, deps);
     done();
   });
 

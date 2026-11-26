@@ -67,6 +67,8 @@ describe("apiEnvSchema", () => {
   });
 });
 
+const KEY = Buffer.alloc(32, 1).toString("base64");
+
 /** A complete production environment. */
 const production = {
   ...required,
@@ -80,6 +82,7 @@ const production = {
   TWILIO_ACCOUNT_SID: `AC${"0".repeat(32)}`,
   TWILIO_AUTH_TOKEN: "token",
   TWILIO_FROM: "+15005550006",
+  TAX_ENCRYPTION_KEYS: `k1:${KEY}`,
 };
 
 describe("message providers", () => {
@@ -128,6 +131,35 @@ describe("message providers", () => {
     expect(() => parseEnv(apiEnvSchema, { ...production, TWILIO_ACCOUNT_SID: "AC1" })).toThrow(
       /TWILIO_ACCOUNT_SID/,
     );
+  });
+});
+
+describe("TAX_ENCRYPTION_KEYS", () => {
+  it("is required in production", () => {
+    expect(() => parseEnv(apiEnvSchema, { ...production, TAX_ENCRYPTION_KEYS: "" })).toThrow(
+      /TAX_ENCRYPTION_KEYS/,
+    );
+  });
+
+  it("parses into a keyring with the first key current", () => {
+    const config = configFromEnv(
+      apiEnvSchema.parse({ ...required, TAX_ENCRYPTION_KEYS: `new:${KEY},old:${KEY}` }),
+    );
+    expect(config.taxKeys?.currentId).toBe("new");
+    expect([...(config.taxKeys?.keys.keys() ?? [])]).toEqual(["new", "old"]);
+  });
+
+  it("reports a bad key without echoing it", () => {
+    const secret = Buffer.alloc(16, 9).toString("base64");
+    let message = "";
+    try {
+      parseEnv(apiEnvSchema, { ...required, TAX_ENCRYPTION_KEYS: `k1:${secret}` });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toMatch(/TAX_ENCRYPTION_KEYS/);
+    expect(message).toMatch(/32 bytes/);
+    expect(message).not.toContain(secret);
   });
 });
 

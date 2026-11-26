@@ -1,6 +1,8 @@
 import { port } from "@nd/config";
 import { z } from "zod";
 
+import { parseTaxKeyring, type TaxKeyring } from "./tax/crypto.ts";
+
 const NODE_ENVS = ["development", "test", "production"] as const;
 const LOG_LEVELS = ["fatal", "error", "warn", "info", "debug", "trace", "silent"] as const;
 
@@ -46,6 +48,16 @@ const sender = z
     /^[^\r\n<>]*<[^\s@<>]+@[^\s@<>]+>$|^[^\s@<>]+@[^\s@<>]+$/,
     "must be an address or Name <address>",
   );
+
+/** `id:base64key,...`, parsed into a keyring; errors never echo key material. */
+const taxKeys = z.string().transform((value, context): TaxKeyring => {
+  try {
+    return parseTaxKeyring(value);
+  } catch (error) {
+    context.addIssue({ code: "custom", message: (error as Error).message });
+    return z.NEVER;
+  }
+});
 
 /**
  * Environment the API reads at start-up. Every value is validated here, so a
@@ -105,6 +117,8 @@ export const apiEnvSchema = z
     ),
     /** Lets production start with console senders (they send nothing), e.g. for end-to-end tests. */
     ALLOW_CONSOLE_MESSAGES: z.enum(["true", "false"]).default("false"),
+    /** Keys for hosts' tax details: `id:base64key` pairs, comma-separated, the first current. */
+    TAX_ENCRYPTION_KEYS: optional(taxKeys),
     /** Stripe secret key; without it, becoming a host answers 503. */
     STRIPE_SECRET_KEY: optionalSecret,
     /** Signing secret of the Stripe webhook endpoint; without it POST /webhooks/stripe answers 503. */
@@ -184,6 +198,7 @@ export const apiEnvSchema = z
           }
         }
       }
+      need("TAX_ENCRYPTION_KEYS", "in production: hosts' tax details are encrypted with it");
       if (!env.PUBLIC_API_URL.startsWith("https://")) {
         context.addIssue({
           code: "custom",
@@ -229,6 +244,8 @@ export interface ApiConfig {
   readonly stripeWebhookSecret: string | undefined;
   /** Platform fee in basis points, kept back from each transfer to the host. */
   readonly platformFeeBps: number;
+  /** Keys for hosts' tax details; without them saving tax details answers 503. */
+  readonly taxKeys: TaxKeyring | undefined;
 }
 
 /** Turns the parsed environment into application settings. */
@@ -260,5 +277,6 @@ export function configFromEnv(env: ApiEnv): ApiConfig {
     onboardingWaitMaxSeconds: env.ONBOARDING_WAIT_MAX_SECONDS,
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
     platformFeeBps: env.PLATFORM_FEE_BPS,
+    taxKeys: env.TAX_ENCRYPTION_KEYS,
   };
 }
