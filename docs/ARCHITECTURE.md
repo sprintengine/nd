@@ -236,6 +236,8 @@ stateDiagram-v2
   confirmed --> cancelled: either side cancels (policy applies)
   confirmed --> no_show: slot ends + 15 min with no arrival
   arrived --> active: StartTransaction received
+  arrived --> completed: slot ends + 10 min, a start was tried or the car plugged in; nothing billed
+  arrived --> no_show: slot ends + 10 min, never plugged in and no start tried
   active --> completed: StopTransaction received
   completed --> [*]
   cancelled --> [*]
@@ -265,8 +267,11 @@ stateDiagram-v2
   suspended_ev --> stopped
   suspended_evse --> stopped
   stopped --> reconciled: meter checked, payment captured
-  stopped --> needs_review: meter mismatch or missing stop
-  needs_review --> reconciled: resolved by host confirmation or support
+  stopped --> needs_review: meter mismatch or no authorisation
+  charging --> needs_host_confirmation: no StopTransaction 10 min after the slot
+  needs_host_confirmation --> reconciled: host confirms, or 72 h pass
+  needs_host_confirmation --> needs_review: host disputes
+  needs_review --> reconciled: resolved by support
 ```
 
 If `StartTransaction` does not arrive within 120 s of an accepted remote start, the gateway sends `TriggerMessage(StatusNotification)` and the app asks the driver to check the cable and try again.
@@ -314,7 +319,7 @@ sequenceDiagram
   API-->>Dr: receipt
 ```
 
-If the slot ends while charging, the API sends `RemoteStopTransaction` 5 minutes after the end. If `StopTransaction` never arrives (for example the host's internet drops), a job closes the session from the last meter value 10 minutes after the window ends, marks it `needs_review` and asks the host to confirm; payment is captured after the host confirms or 72 hours pass.
+If the slot ends while charging, the API sends `RemoteStopTransaction` 5 minutes after the end. If `StopTransaction` never arrives (for example the host's internet drops), a job closes the session from the last meter value 10 minutes after the window ends, marks it `needs_host_confirmation` and emails both sides; payment is captured after the host confirms or 72 hours pass. A host who disputes it instead sends it to support (`needs_review`).
 
 ## 7. Payments
 
@@ -334,7 +339,7 @@ Stripe Connect Express with **separate charges and transfers** ([ADR 0003](adr/0
 1. the session is `reconciled` (not under review or dispute), and
 2. the host's tax details are complete (platform reporting, section 10) and Stripe reports payouts enabled.
 
-The transfer amount is the captured amount minus the platform fee (`PLATFORM_FEE_BPS`, default `0`). A job retries held transfers when either condition changes. Webhooks (`/webhooks/stripe`) are verified by signature and processed idempotently by event id.
+The transfer amount is the captured amount minus the platform fee (`PLATFORM_FEE_BPS`, default `0`). Held transfers are retried when a condition changes: saving tax details, Stripe enabling payouts, or a review or dispute being settled (a sweep every minute catches anything missed). Webhooks (`/webhooks/stripe`) are verified by signature and processed idempotently by event id.
 
 ## 8. OCPP gateway: Zappi profile
 
