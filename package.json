@@ -17,13 +17,17 @@
     "lint": "turbo run lint lint:root",
     "lint:root": "eslint . --ignore-pattern \"apps/**\" --ignore-pattern \"packages/**\"",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "knip": "knip",
+    "lint:packages": "syncpack lint"
   },
   "devDependencies": {
     "@nd/config": "workspace:*",
     "@types/node": "catalog:",
     "eslint": "catalog:",
+    "knip": "catalog:",
     "prettier": "catalog:",
+    "syncpack": "catalog:",
     "turbo": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
