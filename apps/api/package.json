@@ -28,6 +28,7 @@
     "fastify": "catalog:",
     "fastify-type-provider-zod": "catalog:",
     "pg": "catalog:",
+    "pg-boss": "catalog:",
     "stripe": "catalog:",
     "zod": "catalog:"
   },
