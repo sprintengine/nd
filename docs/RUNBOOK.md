@@ -69,6 +69,17 @@ The backup scripts read `infra/.env` on every run; no restart needed.
 
 `AUTH_SECRET`, `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` are in the API block of `infra/.env` and `GATEWAY_INTERNAL_SECRET` in the gateway block. Changing `AUTH_SECRET` signs every user out. Rotate by issuing the new value at the source (Stripe dashboard: roll the key or the webhook signing secret), updating `infra/.env`, and `dc up -d --wait`. Compose recreates only the services whose environment changed. The gateway shared secret is read by both apps, so both restart together; do it in the daytime (see "Upgrades" in DEPLOY.md).
 
+### Tax encryption keys
+
+`TAX_ENCRYPTION_KEYS` in the API block of `infra/.env` encrypts hosts' tax numbers and dates of birth. It is a comma-separated list of `<id>:<base64 key>`; the first key encrypts and every listed key decrypts. Keep a copy of the keys somewhere other than the server and its backups: without them the stored tax numbers cannot be read. To rotate:
+
+1. Make a key: `echo "k$(date +%Y%m):$(openssl rand -base64 32)"`.
+2. Put it first in `TAX_ENCRYPTION_KEYS`, keeping the old one after it, and `dc up -d --wait`.
+3. Re-encrypt the stored rows with the new key: `dc run --rm api dist/rotate-tax-keys.js`. It prints how many hosts it rewrote; a second run prints 0.
+4. Remove the old key from `TAX_ENCRYPTION_KEYS` and `dc up -d --wait` again.
+
+If a key may have leaked, rotate at once, and treat the tax numbers in backups taken before step 3 as readable by whoever holds the old key.
+
 ### A charger's OCPP key
 
 Each charger has its own key, shown once at onboarding and stored only as a hash. If a key leaks, issue a new one from the host flow and enter it in the host's myenergi account (below); the old key stops working at once.

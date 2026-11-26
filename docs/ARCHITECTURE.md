@@ -86,6 +86,7 @@ Both apps ship as Docker images and are configured only through environment vari
 erDiagram
   users ||--o| hosts : "may be"
   hosts ||--o{ chargers : owns
+  hosts ||--o| host_tax_details : "reports with"
   chargers ||--o{ availability_rules : has
   chargers ||--o{ bookings : receives
   users ||--o{ bookings : makes
@@ -109,11 +110,19 @@ erDiagram
     uuid user_id FK
     text stripe_account_id
     text payout_status
-    text tax_country
-    text tin_encrypted
     bool tax_details_complete
     tstzrange night_rate_window "cheap tariff hours, optional"
     int max_sessions_per_day
+  }
+  host_tax_details {
+    uuid host_id PK
+    text entity_type "individual | business"
+    text legal_name
+    text company_number
+    text tax_country
+    text tin_encrypted "AES-256-GCM"
+    text tin_masked
+    text encryption_key_id
   }
   chargers {
     uuid id PK
@@ -209,7 +218,7 @@ Rules the schema enforces:
 - `bookings.id_tag` is generated server-side from a cryptographic random source, is unique, at most 20 characters (the OCPP limit) and valid only inside its booking window. It is the only credential a driver needs; drivers never learn the host's own tag or PIN.
 - `chargers.location` is `geography(Point, 4326)` with a GiST index; search uses `ST_DWithin` and ranks by distance, then rating. Until a booking is confirmed, search returns the location rounded to about 150 m and never the address.
 - `ocpp_messages` is append-only: the application role has no update or delete grant. It is the evidence file for disputes.
-- Secrets (`ocpp_secret_hash`, `tin_encrypted`) are never in a query helper's default column list.
+- Secrets (`ocpp_secret_hash`, and the encrypted TIN and date of birth in `host_tax_details`) are never in a query helper's default column list.
 - Status columns are Postgres enums matching the state machines below.
 
 ## 5. State machines
@@ -392,11 +401,13 @@ GET    /openapi.json                             OpenAPI 3.1, generated from the
 
 GET    /auth/* | POST /auth/*                    Better Auth routes
 GET    /me                                       the user, with phone-verified and host flags
-POST   /me/delete                                GDPR deletion (section 10)
+POST   /me/delete                                GDPR deletion after a 7-day undo window (section 10)
+POST   /me/delete/cancel                         undo it with the emailed token
 
 GET    /chargers?lat&lng&radius&from&to          search: online and free in the window
 GET    /chargers/:id                             listing, approximate location until booked
 POST   /hosts                                    become a host; returns a Stripe onboarding link
+GET    /hosts/me/tax-details | PUT               tax identity for platform reporting; TIN masked on read
 POST   /hosts/chargers                           start onboarding: wss URL, ChargeboxID, secret
 GET    /hosts/chargers/:id/onboarding?wait=N     long-polls for the first BootNotification
 PATCH  /hosts/chargers/:id                       pricing, availability, instant book, night-rate window
@@ -423,8 +434,8 @@ Realtime events: `booking:update`, `session:update {status, kwh, kw, elapsed, co
 - **Abuse:** rate limits on auth, search and booking; a cap on sessions per host per day; an audit log for admin actions.
 - **Driver identity:** verified email and phone; vehicle plate per booking (shown to the host); identity verification through Stripe when a host requires it.
 - **Location privacy:** approximate pins and no address until a booking is confirmed.
-- **Platform reporting:** hosts provide legal name, address, date of birth or company number, and a tax identification number with its country before their first transfer. The number is encrypted at rest with an application key and validated per country. An annual export produces the EU DAC7 report for Irish hosts and the HMRC platform-operator report for UK hosts; neither has a minimum threshold for services.
-- **Retention and deletion:** meter values and OCPP messages are kept for 24 months, then purged; sessions and accounting rows are kept. Deleting an account anonymises personal data and keeps the accounting rows with the user reference removed.
+- **Platform reporting:** hosts provide legal name, address, date of birth or company number, and a tax identification number with its country before their first transfer. The number and the date of birth are encrypted at rest (AES-256-GCM) with rotatable application keys; the number is validated per country and only ever shown masked. An annual export produces the EU DAC7 report for Irish hosts and the HMRC platform-operator report for UK hosts; neither has a minimum threshold for services.
+- **Retention and deletion:** meter values and OCPP messages are kept for 24 months, then purged; sessions and accounting rows are kept. Deleting an account signs it out everywhere at once and, after a 7-day undo window, anonymises its personal data. The user row stays as a tombstone without personal data, so bookings, payments and transfers keep adding up. Deletion waits until no booking is open and nothing is owed.
 - **Regulatory posture:** sharing a private driveway charger by booking falls outside the UK public charge point rules, and keeping access booking-only (no walk-up QR codes) keeps the service clearly private under the EU's alternative fuels infrastructure rules in Ireland. 3-pin sockets are excluded. Both points are to be confirmed by legal review before launch.
 
 ## 11. Hosting

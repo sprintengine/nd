@@ -14,7 +14,7 @@ export CORS_ORIGINS=http://localhost:5173
 pnpm --filter @nd/api dev          # http://localhost:3000
 ```
 
-Sign-in links and phone codes are written to the console in development. To sign in with curl:
+With the default console senders, sign-in links and phone codes are written to the console in development. To sign in with curl:
 
 ```sh
 curl -X POST localhost:3000/auth/sign-in/magic-link -H 'content-type: application/json' \
@@ -28,31 +28,40 @@ curl -X POST localhost:3000/auth/sign-in/magic-link -H 'content-type: applicatio
 
 Every variable is validated at start-up (`src/env.ts`); a bad value stops the process with a message naming it. Optional values that are empty count as unset.
 
-| Variable                                   | Default                    | Purpose                                                                                     |
-| ------------------------------------------ | -------------------------- | ------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                             | required                   | Postgres with PostGIS                                                                       |
-| `AUTH_SECRET`                              | required                   | Signs session cookies and tokens; at least 32 characters                                    |
-| `NODE_ENV`                                 | `development`              | `production` requires https and wss URLs and stops console senders printing links and codes |
-| `HOST`, `PORT`                             | `0.0.0.0`, `3000`          | Where to listen                                                                             |
-| `LOG_LEVEL`                                | `info`                     | pino level; cookies, authorization headers and secrets are redacted                         |
-| `PUBLIC_API_URL`                           | `http://localhost:3000`    | Base of magic links and OAuth callbacks; https makes cookies `Secure`                       |
-| `PUBLIC_APP_URL`                           | `http://localhost:5173`    | The web app; trusted by Better Auth and the target of Stripe's return links                 |
-| `CORS_ORIGINS`                             | none                       | Comma-separated origins allowed to call with cookies                                        |
-| `COOKIE_DOMAIN`                            | unset                      | Parent domain to share the session cookie across subdomains                                 |
-| `TRUST_PROXY_HOPS`                         | `0`                        | Reverse proxies in front of the API whose `X-Forwarded-For` is trusted                      |
-| `AUTH_RATE_LIMIT`                          | `on`                       | Better Auth's rate limiter (`off` only for local experiments)                               |
-| `SEARCH_RATE_LIMIT_PER_MINUTE`             | `60`                       | Per client IP, on `GET /chargers` and `GET /chargers/:id`                                   |
-| `APPLE_CLIENT_ID`, `APPLE_CLIENT_SECRET`   | unset                      | Sign in with Apple; both or neither. `APPLE_APP_BUNDLE_ID` for native ID tokens             |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | unset                      | Sign in with Google; both or neither                                                        |
-| `EMAIL_PROVIDER`, `SMS_PROVIDER`           | `console`                  | Only the console senders exist so far                                                       |
-| `STRIPE_SECRET_KEY`                        | unset                      | Stripe for host payouts and driver payments; without it those routes answer 503             |
-| `STRIPE_WEBHOOK_SECRET`                    | unset                      | Verifies `POST /webhooks/stripe`; without it the endpoint answers 503                       |
-| `PLATFORM_FEE_BPS`                         | `0`                        | Platform fee kept back from each host transfer, in basis points (100 = 1 %)                 |
-| `STRIPE_API_BASE_URL`                      | Stripe                     | Another Stripe API, e.g. stripe-mock in end-to-end tests                                    |
-| `OCPP_WSS_URL`                             | `ws://localhost:9000/v16/` | The OCPP URL hosts enter in their charger account; must end in `/`                          |
-| `GATEWAY_INTERNAL_URL`                     | `http://localhost:9100`    | The gateway's internal ChargerControl endpoint                                              |
-| `GATEWAY_INTERNAL_SECRET`                  | required                   | Bearer secret shared with the gateway; at least 32 characters                               |
-| `ONBOARDING_WAIT_MAX_SECONDS`              | `25`                       | Longest the onboarding long-poll waits                                                      |
+| Variable                                      | Default                    | Purpose                                                                                                                                                 |
+| --------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                | required                   | Postgres with PostGIS                                                                                                                                   |
+| `AUTH_SECRET`                                 | required                   | Signs session cookies and tokens; at least 32 characters                                                                                                |
+| `NODE_ENV`                                    | `development`              | `production` requires https and wss URLs, real email and SMS providers, and `TAX_ENCRYPTION_KEYS`                                                       |
+| `HOST`, `PORT`                                | `0.0.0.0`, `3000`          | Where to listen                                                                                                                                         |
+| `LOG_LEVEL`                                   | `info`                     | pino level; cookies, authorization headers and secrets are redacted                                                                                     |
+| `PUBLIC_API_URL`                              | `http://localhost:3000`    | Base of magic links and OAuth callbacks; https makes cookies `Secure`                                                                                   |
+| `PUBLIC_APP_URL`                              | `http://localhost:5173`    | The web app; trusted by Better Auth and the target of Stripe's return links                                                                             |
+| `CORS_ORIGINS`                                | none                       | Comma-separated origins allowed to call with cookies                                                                                                    |
+| `COOKIE_DOMAIN`                               | unset                      | Parent domain to share the session cookie across subdomains                                                                                             |
+| `TRUST_PROXY_HOPS`                            | `0`                        | Reverse proxies in front of the API whose `X-Forwarded-For` is trusted                                                                                  |
+| `AUTH_RATE_LIMIT`                             | `on`                       | Better Auth's rate limiter (`off` only for local experiments)                                                                                           |
+| `SEARCH_RATE_LIMIT_PER_MINUTE`                | `60`                       | Per client IP, on `GET /chargers` and `GET /chargers/:id`                                                                                               |
+| `APPLE_CLIENT_ID`, `APPLE_CLIENT_SECRET`      | unset                      | Sign in with Apple; both or neither. `APPLE_APP_BUNDLE_ID` for native ID tokens                                                                         |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`    | unset                      | Sign in with Google; both or neither                                                                                                                    |
+| `EMAIL_PROVIDER`                              | `console`                  | `smtp`, `resend`, or `console` (written to the log; development and tests)                                                                              |
+| `EMAIL_FROM`                                  | unset                      | Sender of every email (`nd <no-reply@example.com>`); required by `smtp` and `resend`                                                                    |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`       | unset, `587`, by port      | SMTP server; `SMTP_SECURE` (TLS from the start) defaults to true on 465, otherwise STARTTLS is required                                                 |
+| `SMTP_USER`, `SMTP_PASSWORD`                  | unset                      | SMTP credentials; both or neither                                                                                                                       |
+| `RESEND_API_KEY`                              | unset                      | Resend's HTTP API, with `EMAIL_PROVIDER=resend`                                                                                                         |
+| `SMS_PROVIDER`                                | `console`                  | `twilio`, or `console`                                                                                                                                  |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`     | unset                      | Twilio's REST API, with `SMS_PROVIDER=twilio`                                                                                                           |
+| `TWILIO_FROM`, `TWILIO_MESSAGING_SERVICE_SID` | unset                      | Send from a number or sender id, or through a Messaging Service: exactly one                                                                            |
+| `ALLOW_CONSOLE_MESSAGES`                      | `false`                    | `true` lets production start with console senders, which then send nothing (test stacks only)                                                           |
+| `TAX_ENCRYPTION_KEYS`                         | unset                      | `id:base64key` pairs, comma-separated, the first current; encrypt hosts' tax numbers. Required in production; without it saving tax details answers 503 |
+| `STRIPE_SECRET_KEY`                           | unset                      | Stripe for host payouts and driver payments; without it those routes answer 503                                                                         |
+| `STRIPE_WEBHOOK_SECRET`                       | unset                      | Verifies `POST /webhooks/stripe`; without it the endpoint answers 503                                                                                   |
+| `PLATFORM_FEE_BPS`                            | `0`                        | Platform fee kept back from each host transfer, in basis points (100 = 1 %)                                                                             |
+| `STRIPE_API_BASE_URL`                         | Stripe                     | Another Stripe API, e.g. stripe-mock in end-to-end tests                                                                                                |
+| `OCPP_WSS_URL`                                | `ws://localhost:9000/v16/` | The OCPP URL hosts enter in their charger account; must end in `/`                                                                                      |
+| `GATEWAY_INTERNAL_URL`                        | `http://localhost:9100`    | The gateway's internal ChargerControl endpoint                                                                                                          |
+| `GATEWAY_INTERNAL_SECRET`                     | required                   | Bearer secret shared with the gateway; at least 32 characters                                                                                           |
+| `ONBOARDING_WAIT_MAX_SECONDS`                 | `25`                       | Longest the onboarding long-poll waits                                                                                                                  |
 
 ## How it fits together
 
@@ -63,6 +72,10 @@ Every variable is validated at start-up (`src/env.ts`); a bad value stops the pr
 - **Bookings** (`src/routes/bookings.ts`, rules in `src/bookings/`): `POST /bookings` checks the charger is online and listed, the slot lies inside one availability window in the charger's time zone and under the host's daily cap, and refuses an overlap with 409 before calling Stripe. The quote comes from `quote()` in `@nd/domain` (the slot's minutes at the hourly price, no fee). Instant book confirms at once with a 20-character idTag; otherwise the host approves (`/approve`, idTag issued then) or declines (`/decline`, authorisation released). `/cancel` applies the host's cutoff (default 2 hours): free before it, one hour at the hourly price (capped at the quote) after it, never once the driver has arrived. The driver sees the address only while the booking holds the slot.
 - **Payments** (`src/stripe/payments.ts`, `src/payments/`): separate charges and transfers. Each driver gets a Stripe Customer the first time they save a card (`POST /me/payment-methods/setup-intent`); the app confirms the SetupIntent with Stripe's SDK, so card details never reach the API. A slot starting within 6 days is authorised at booking with an off-session, manual-capture PaymentIntent on the platform account (`transfer_group` = booking id); a later one keeps the saved card (`card_saved`) and is authorised by a job 24 hours ahead. `captureForBooking(bookingId, amount)` captures at most the authorised amount; `createHostTransfer(paymentId)` sends the capture less the platform fee to the host's connected account with `source_transaction`, or records it as held while the session needs review, a dispute is open, the host's tax details are incomplete or payouts are not enabled. Every Stripe write has an idempotency key derived from the booking (`booking-<id>-authorise`, `-release`, `-capture`, `-transfer`). Stripe errors reach clients only as a 502 `payment-provider-error`.
 - **Webhooks** (`src/routes/webhooks.ts`): `POST /webhooks/stripe` verifies the signature against the raw body, records the event id in `stripe_webhook_events` in the same transaction as its effects (a redelivery answers `duplicate`), and handles `payment_intent.amount_capturable_updated`, `.succeeded`, `.canceled` and `.payment_failed`, `setup_intent.succeeded` (the first card becomes the default) and `account.updated` (mirrored into `hosts.payout_status`, which unblocks publishing). Only event ids and types are logged.
+- **Email and SMS** (`src/senders/`): SMTP (nodemailer) or Resend for email and Twilio's REST API for SMS, chosen by the environment; the console senders stay for development and tests. Each attempt times out after 10 seconds; server errors, rate limits and network failures are retried twice with backoff (SMTP: temporary 4xx replies), and Resend gets one idempotency key per message. A failure is a `MessageDeliveryError` naming the provider and a masked recipient (`a***@example.com`, `***567`); provider messages, which can echo the address or number, are never passed on. The templates (`templates.ts`) have a plain-text part and a simple HTML part with no images, remote resources or tracking.
+- **Tax details** (`src/routes/tax-details.ts`, `src/tax/`): `PUT /hosts/me/tax-details` takes a host's legal name and date of birth, or company name and number, with address, tax country and TIN. The TIN is checked with `checkTin` from `@nd/domain` (IE: PPSN or tax reference with its check letter; UK: 10-digit UTR or National Insurance number). The TIN and date of birth are sealed with AES-256-GCM under the first key of `TAX_ENCRYPTION_KEYS`, with the host and column as associated data, and the key id is stored in the row. Reads never decrypt: the TIN comes back masked to its last three characters and the date of birth not at all. Saving sets `hosts.tax_details_complete` and re-queues transfers held only for it. Request bodies are never logged, and `tin` and `dateOfBirth` are on the log redaction list.
+- **Account deletion** (`src/routes/account-deletion.ts`, `src/accounts/`): `POST /me/delete` refuses (409, with reasons) while the user has a booking that is not finished, as driver or host, or owes a payment. Otherwise it records the request, due in 7 days, takes the user's chargers off the listings, emails an undo link to `PUBLIC_APP_URL/account/restore?token=…` (only the token's hash is stored) and then deletes every session, so the old cookie is 401 at once. Signing in again is refused (`ACCOUNT_DELETION_PENDING`) until the user undoes it with `POST /me/delete/cancel {token}`, which relists the chargers. When the request falls due, the `account-deletions` job anonymises the account: the `users` row stays as a tombstone (`deleted_at`, no name, email, phone, image or Stripe customer); linked sign-ins, sessions, codes and device tokens are deleted; vehicle plates and review comments are cleared; the host's tax details are deleted and their chargers lose their address, OCPP password and exact position. Bookings, sessions, payments, transfers, reviews and disputes keep pointing at the tombstone, so accounting still adds up.
+- **Retention** (`src/compliance/retention.ts`): the `telemetry-retention` job deletes meter values older than 24 months and calls `purge_ocpp_messages()` for the OCPP log; sessions and accounting rows are kept. The function runs as its owner; if the API connects as another role, grant that role `EXECUTE` on it.
 - Data access lives in `src/data/`; unit tests mock it, integration tests run it against Postgres.
 - Errors are `application/problem+json` (`src/http/problem.ts`), including Better Auth's, which keep its `code` and `message`.
 
@@ -89,12 +102,16 @@ await services.jobs.send(noShowJob, { bookingId }, { startAfter, singletonKey: b
 - A payload that fails validation is logged and dropped, never retried.
 - Tests: `runner.runNow(job, payload)` runs a handler at once as its last attempt; `runner.drain()` works every ready job, including ones they queue. Unit tests use the in-memory runner in `test/fakes.ts`.
 
-| Job                      | When                    | What                                                                                       |
-| ------------------------ | ----------------------- | ------------------------------------------------------------------------------------------ |
-| `authorise-booking`      | 24 h before the slot    | Authorises the saved card; retries a decline, then cancels the booking at no charge        |
-| `booking-expire-request` | slot start              | Cancels a request the host never answered and releases the authorisation                   |
-| `booking-no-show`        | slot end + 15 min       | A confirmed booking never arrived at becomes `no_show` and pays one hour (capped at quote) |
-| `host-transfer`          | after a fee is captured | Sends or holds the host's transfer                                                         |
+| Job                      | When                                              | What                                                                                       |
+| ------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `authorise-booking`      | 24 h before the slot                              | Authorises the saved card; retries a decline, then cancels the booking at no charge        |
+| `booking-expire-request` | slot start                                        | Cancels a request the host never answered and releases the authorisation                   |
+| `booking-no-show`        | slot end + 15 min                                 | A confirmed booking never arrived at becomes `no_show` and pays one hour (capped at quote) |
+| `host-transfer`          | after a fee is captured, or tax details are saved | Sends or holds the host's transfer                                                         |
+| `account-deletions`      | daily, 03:15 UTC                                  | Anonymises accounts whose 7-day undo window has passed (`processDueDeletions`)             |
+| `telemetry-retention`    | daily, 03:45 UTC                                  | Deletes meter values and OCPP messages older than 24 months (`purgeExpiredTelemetry`)      |
+
+A definition with a `cron` (five fields, UTC) is also scheduled; pg-boss keeps one schedule per job, and the runner drops it when the field goes. The plain functions behind the jobs are exported from `src/scheduled.ts`. `node dist/rotate-tax-keys.js` re-encrypts tax details still on an older key (see docs/RUNBOOK.md).
 
 ## Tests
 
