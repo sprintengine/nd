@@ -1,0 +1,90 @@
+# Throwaway stack for end-to-end tests, locally and in CI: both apps built
+# from their Dockerfiles, Postgres with PostGIS, and stripe-mock in place of
+# Stripe. Nothing here is persistent and no value here is a real secret.
+#
+#   infra/e2e-smoke.sh        # build, start, check and tear down
+#
+# Host ports (loopback only) can be moved with E2E_API_PORT, E2E_GATEWAY_PORT
+# and E2E_STRIPE_PORT.
+name: nd-e2e
+
+x-app: &app
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  depends_on:
+    postgres:
+      condition: service_healthy
+    stripe-mock:
+      condition: service_started
+
+services:
+  api:
+    <<: *app
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    image: nd-api:e2e
+    environment:
+      DATABASE_URL: postgres://nd:nd@postgres:5432/nd
+      # For the Stripe client once payments land: stripe-mock accepts any
+      # sk_test_ key.
+      STRIPE_SECRET_KEY: sk_test_e2e
+      STRIPE_API_BASE_URL: http://stripe-mock:12111
+    healthcheck:
+      test:
+        - CMD
+        - /nodejs/bin/node
+        - -e
+        - "fetch('http://127.0.0.1:3000/readyz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    ports:
+      - "127.0.0.1:${E2E_API_PORT:-13000}:3000"
+
+  ocpp-gateway:
+    <<: *app
+    build:
+      context: ..
+      dockerfile: apps/ocpp-gateway/Dockerfile
+    image: nd-ocpp-gateway:e2e
+    environment:
+      DATABASE_URL: postgres://nd:nd@postgres:5432/nd
+    healthcheck:
+      test:
+        - CMD
+        - /nodejs/bin/node
+        - -e
+        - "fetch('http://127.0.0.1:9000/readyz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    ports:
+      - "127.0.0.1:${E2E_GATEWAY_PORT:-19000}:9000"
+
+  postgres:
+    image: postgis/postgis:17-3.7@sha256:29619efaa36ece13e4e5abf69fe03f49b4f27f64ef01fc4c3f20b4f2228f7418
+    # The image is published for amd64 only; Docker emulates it on arm64 hosts.
+    platform: linux/amd64
+    environment:
+      POSTGRES_USER: nd
+      POSTGRES_PASSWORD: nd
+      POSTGRES_DB: nd
+    # Data lives in memory and is gone after `down`.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nd -d nd"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  # Stripe's official mock of its API (github.com/stripe/stripe-mock).
+  stripe-mock:
+    image: stripe/stripe-mock:v0.206.0@sha256:aeb96b83e87a893d2ac005e363ac01ffa6e59a5ad85b49c155dfc9129de02e78
+    ports:
+      - "127.0.0.1:${E2E_STRIPE_PORT:-12111}:12111"
