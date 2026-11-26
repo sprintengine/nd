@@ -29,7 +29,7 @@ jobs:
       - name: Lint the Dockerfiles
         run: |
           status=0
-          for dockerfile in apps/*/Dockerfile; do
+          for dockerfile in apps/*/Dockerfile tests/e2e/stripe-double/Dockerfile; do
             echo "::group::$dockerfile"
             docker run --rm -i "$HADOLINT_IMAGE" hadolint - < "$dockerfile" || status=1
             echo "::endgroup::"
@@ -100,10 +100,10 @@ jobs:
             --exit-code 1 --no-progress "$IMAGE"
 
   e2e:
-    name: E2E smoke test
+    name: End-to-end tests
     needs: [build]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -134,6 +134,21 @@ jobs:
           # The gateway checks Basic Auth, so an upgrade without credentials is a 401.
           E2E_EXPECT_WS_STATUS: "401"
         run: infra/e2e-smoke.sh
+      - uses: ./.github/actions/setup
+      # The scenarios in tests/e2e, against the same images. The suite starts
+      # the stack and leaves its logs in tests/e2e/stack.log.
+      - name: Run the end-to-end suite
+        env:
+          E2E_NO_BUILD: "1"
+        run: pnpm test:e2e
+      - name: Upload the stack's logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-stack-logs
+          path: tests/e2e/stack.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   # One stable check to require in branch protection, as in ci.yml.
   docker-result:
