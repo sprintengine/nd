@@ -14,7 +14,9 @@ export type MessageTypeId = (typeof MessageTypeId)[keyof typeof MessageTypeId];
  * Picks the subprotocol to accept from those offered on the WebSocket upgrade.
  * Returns `undefined` when OCPP 1.6 is not offered, and the upgrade must be refused.
  */
-export function selectSubprotocol(offered: Iterable<string>): typeof OCPP16_SUBPROTOCOL | undefined {
+export function selectSubprotocol(
+  offered: Iterable<string>,
+): typeof OCPP16_SUBPROTOCOL | undefined {
   for (const protocol of offered) {
     if (protocol.trim() === OCPP16_SUBPROTOCOL) {
       return OCPP16_SUBPROTOCOL;

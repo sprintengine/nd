@@ -9,7 +9,9 @@ export const BILLING_INCREMENT_MINUTES = 5;
  */
 export function billableMinutes(actualMinutes: number): number {
   if (!Number.isFinite(actualMinutes) || actualMinutes < 0) {
-    throw new RangeError(`actualMinutes must be a finite, non-negative number, got ${String(actualMinutes)}`);
+    throw new RangeError(
+      `actualMinutes must be a finite, non-negative number, got ${String(actualMinutes)}`,
+    );
   }
   return Math.ceil(actualMinutes / BILLING_INCREMENT_MINUTES) * BILLING_INCREMENT_MINUTES;
 }

@@ -5,15 +5,30 @@ packages:
 # Every external dependency version lives here, so all workspaces use the same one.
 catalogMode: strict
 catalog:
+  "@eslint/js": 10.0.1
   "@types/node": 26.6.10
   "@types/pg": 8.23.1
   "@vitest/coverage-v8": 5.1.2
   drizzle-orm: 0.45.4
+  eslint: 10.15.0
+  eslint-config-prettier: 10.1.8
+  eslint-plugin-simple-import-sort: 14.0.0
   fastify: 5.12.8
+  globals: 17.14.0
   pg: 8.23.1
+  prettier: 3.10.1
   turbo: 2.11.13
   typescript: 7.0.2
+  typescript-eslint: 8.74.0
   vitest: 5.1.2
   zod: 4.6.7
+
+catalogs:
+  # typescript-eslint needs the TypeScript compiler API, which TypeScript 7 does
+  # not ship yet. @nd/config (the only package that loads typescript-eslint)
+  # gets TypeScript 6's API under the name "typescript"; `tsc` everywhere else
+  # is TypeScript 7. Drop this once typescript-eslint supports TypeScript 7.
+  lint:
+    typescript: npm:@typescript/typescript6@6.0.2
 
 engineStrict: true

@@ -23,7 +23,9 @@ const shared = {
  * Unit tests: `src/**\/*.test.ts`, no network or database, v8 coverage with
  * per-package thresholds. Entry points (`src/main.ts`) are excluded from coverage.
  */
-export function defineUnitConfig(options: { coverageThresholds: CoverageThresholds }): ViteUserConfig {
+export function defineUnitConfig(options: {
+  coverageThresholds: CoverageThresholds;
+}): ViteUserConfig {
   return defineConfig({
     ...shared,
     test: {
@@ -54,7 +56,7 @@ export function defineIntegrationConfig(): ViteUserConfig {
       fileParallelism: false,
       testTimeout: 30_000,
       hookTimeout: 30_000,
-      env: { DATABASE_URL: process.env["DATABASE_URL"] ?? DEV_DATABASE_URL },
+      env: { DATABASE_URL: process.env.DATABASE_URL ?? DEV_DATABASE_URL },
     },
   });
 }

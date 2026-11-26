@@ -3,55 +3,37 @@
   "ui": "stream",
   "tasks": {
     "transit": {
-      "dependsOn": [
-        "^transit"
-      ]
+      "dependsOn": ["^transit"]
     },
     "build": {
-      "dependsOn": [
-        "^build"
-      ],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!**/*.test.ts",
-        "!vitest*.config.ts",
-        "!README.md"
-      ],
-      "outputs": [
-        "dist/**"
-      ]
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "!**/*.test.ts", "!vitest*.config.ts", "!README.md"],
+      "outputs": ["dist/**"]
     },
     "typecheck": {
-      "dependsOn": [
-        "transit"
-      ]
+      "dependsOn": ["transit"]
     },
     "dev": {
       "cache": false,
       "persistent": true
     },
     "test": {
-      "dependsOn": [
-        "transit"
-      ],
-      "outputs": [
-        "coverage/**"
-      ]
+      "dependsOn": ["transit"],
+      "outputs": ["coverage/**"]
     },
     "test:integration": {
-      "dependsOn": [
-        "transit"
-      ],
+      "dependsOn": ["transit"],
       "cache": false,
-      "env": [
-        "DATABASE_URL"
-      ]
+      "env": ["DATABASE_URL"]
     },
     "//#typecheck:root": {
-      "inputs": [
-        "*.ts",
-        "tsconfig.json"
-      ]
+      "inputs": ["*.ts", "tsconfig.json"]
+    },
+    "lint": {
+      "dependsOn": ["transit"]
+    },
+    "//#lint:root": {
+      "inputs": ["*.ts", "*.js", "tsconfig.json"]
     }
   }
 }

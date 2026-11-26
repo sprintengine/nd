@@ -14,6 +14,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint .",
     "test": "vitest run --coverage",
     "typecheck": "tsc"
   },
@@ -21,6 +22,7 @@
     "@nd/config": "workspace:*",
     "@types/node": "catalog:",
     "@vitest/coverage-v8": "catalog:",
+    "eslint": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

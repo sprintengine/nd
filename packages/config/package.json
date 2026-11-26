@@ -11,21 +11,29 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./eslint": "./eslint.js",
     "./tsconfig/*.json": "./tsconfig/*.json",
     "./vitest": "./vitest.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc",
-    "test": "vitest run --coverage"
+    "lint": "eslint .",
+    "test": "vitest run --coverage",
+    "typecheck": "tsc"
   },
   "dependencies": {
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@eslint/js": "catalog:",
     "@types/node": "catalog:",
     "@vitest/coverage-v8": "catalog:",
-    "typescript": "catalog:",
+    "eslint": "catalog:",
+    "eslint-config-prettier": "catalog:",
+    "eslint-plugin-simple-import-sort": "catalog:",
+    "globals": "catalog:",
+    "typescript": "catalog:lint",
+    "typescript-eslint": "catalog:",
     "vitest": "catalog:"
   }
 }
