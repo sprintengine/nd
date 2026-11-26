@@ -1,11 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { BOOKING_STATUSES, SESSION_STATUSES } from "./status.ts";
+import {
+  BOOKING_STATUSES,
+  PAYMENT_STATUSES,
+  SESSION_STATUSES,
+  TRANSFER_STATUSES,
+} from "./status.ts";
 import {
   BOOKING_TRANSITIONS,
   canTransitionBooking,
+  canTransitionPayment,
   canTransitionSession,
+  canTransitionTransfer,
+  isCancellable,
+  PAYMENT_TRANSITIONS,
   SESSION_TRANSITIONS,
+  TRANSFER_TRANSITIONS,
 } from "./transitions.ts";
 
 describe("booking transitions", () => {
@@ -56,5 +66,59 @@ describe("session transitions", () => {
     ["failed", "starting"],
   ] as const)("refuse %s -> %s", (from, to) => {
     expect(canTransitionSession(from, to)).toBe(false);
+  });
+});
+
+describe("payment transitions", () => {
+  it("cover every status", () => {
+    expect(Object.keys(PAYMENT_TRANSITIONS).sort()).toEqual([...PAYMENT_STATUSES].sort());
+  });
+
+  it.each([
+    ["pending_authorisation", "authorised"],
+    ["pending_authorisation", "card_saved"],
+    ["card_saved", "authorised"],
+    ["card_saved", "failed"],
+    ["authorised", "captured"],
+    ["authorised", "cancelled"],
+  ] as const)("allow %s -> %s", (from, to) => {
+    expect(canTransitionPayment(from, to)).toBe(true);
+  });
+
+  it.each([
+    ["captured", "cancelled"],
+    ["cancelled", "authorised"],
+    ["card_saved", "captured"],
+    ["failed", "authorised"],
+  ] as const)("refuse %s -> %s", (from, to) => {
+    expect(canTransitionPayment(from, to)).toBe(false);
+  });
+});
+
+describe("transfer transitions", () => {
+  it("cover every status", () => {
+    expect(Object.keys(TRANSFER_TRANSITIONS).sort()).toEqual([...TRANSFER_STATUSES].sort());
+  });
+
+  it.each([
+    ["pending", "held"],
+    ["pending", "sent"],
+    ["held", "sent"],
+    ["sent", "reversed"],
+  ] as const)("allow %s -> %s", (from, to) => {
+    expect(canTransitionTransfer(from, to)).toBe(true);
+  });
+
+  it.each([
+    ["sent", "held"],
+    ["reversed", "sent"],
+  ] as const)("refuse %s -> %s", (from, to) => {
+    expect(canTransitionTransfer(from, to)).toBe(false);
+  });
+});
+
+describe("cancellable bookings", () => {
+  it("are requested or confirmed only", () => {
+    expect(BOOKING_STATUSES.filter(isCancellable)).toEqual(["requested", "confirmed"]);
   });
 });

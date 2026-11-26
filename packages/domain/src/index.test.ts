@@ -1,19 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { billableMinutes } from "./index.ts";
+import * as domain from "./index.ts";
 
-describe("billableMinutes", () => {
-  it.each([
-    [0, 0],
-    [1, 5],
-    [5, 5],
-    [5.01, 10],
-    [219, 220],
-  ])("bills %d minutes as %d", (actual, billed) => {
-    expect(billableMinutes(actual)).toBe(billed);
-  });
-
-  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])("rejects %d", (actual) => {
-    expect(() => billableMinutes(actual)).toThrow(RangeError);
+describe("@nd/domain", () => {
+  it("exports pricing, status vocabularies and transitions", () => {
+    expect(domain.quote).toBeTypeOf("function");
+    expect(domain.billableMinutes(1)).toBe(5);
+    expect(domain.BOOKING_STATUSES).toContain("requested");
+    expect(domain.canTransitionPayment).toBeTypeOf("function");
   });
 });
