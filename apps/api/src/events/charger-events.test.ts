@@ -130,6 +130,43 @@ describe("pgChargerEvents", () => {
     }
   });
 
+  it("delivers every charger's events and resyncs to subscribers of all chargers", async () => {
+    vi.useFakeTimers();
+    try {
+      const clients: FakeClient[] = [];
+      const events = pgChargerEvents({
+        connect: () => {
+          const client = new FakeClient();
+          clients.push(client);
+          return client;
+        },
+        reconnectDelayMs: 10,
+      });
+      const all: ChargerSignal[] = [];
+      const one: ChargerSignal[] = [];
+      const stop = await events.subscribeAll((signal) => all.push(signal));
+      await events.subscribe(C1, (signal) => one.push(signal));
+      expect(clients).toHaveLength(1);
+      clients[0]?.notify(JSON.stringify(boot(C1)));
+      clients[0]?.notify(JSON.stringify(boot(C2)));
+      expect(all.map((signal) => signal.kind === "event" && signal.event.chargerId)).toEqual([
+        C1,
+        C2,
+      ]);
+      expect(one).toHaveLength(1);
+      clients[0]?.emit("end");
+      await vi.advanceTimersByTimeAsync(20);
+      expect(all.at(-1)).toEqual({ kind: "resync" });
+      stop();
+      clients[1]?.notify(JSON.stringify(boot(C2)));
+      expect(all).toHaveLength(3);
+      await events.close();
+      await expect(events.subscribeAll(() => undefined)).rejects.toThrow(/closed/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("creates real clients lazily", async () => {
     const events = createPgChargerEvents("postgres://nobody@127.0.0.1:1/none", () => undefined);
     await events.close();
@@ -143,6 +180,7 @@ function manualEvents() {
       listeners.add(listener);
       return Promise.resolve(() => listeners.delete(listener));
     },
+    subscribeAll: () => Promise.reject(new Error("not used")),
     close: () => Promise.resolve(),
   };
   return {

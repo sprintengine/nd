@@ -5,6 +5,13 @@
   "description": "OCPP 1.6J central system that chargers (via the vendor cloud) connect to over WebSocket.",
   "license": "Apache-2.0",
   "type": "module",
+  "exports": {
+    "./app": {
+      "@nd/source": "./src/app.ts",
+      "types": "./dist/app.d.ts",
+      "default": "./dist/app.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "node --conditions=@nd/source --watch src/main.ts",

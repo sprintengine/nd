@@ -12,6 +12,7 @@ catalog:
   "@fastify/helmet": 13.2.0
   "@fastify/rate-limit": 11.3.0
   "@fastify/swagger": 9.9.5
+  "@fastify/websocket": 11.3.7
   "@types/node": 26.6.10
   "@types/pg": 8.23.1
   "@types/ws": 8.18.2

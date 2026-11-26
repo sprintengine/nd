@@ -20,6 +20,11 @@ export interface ChargerEvents {
    * and never miss a change in between. Resolves to an unsubscribe function.
    */
   subscribe(chargerId: string, listener: ChargerListener): Promise<() => void>;
+  /**
+   * Starts listening for events about every charger, on the same connection.
+   * Resolves like `subscribe` to an unsubscribe function.
+   */
+  subscribeAll(listener: ChargerListener): Promise<() => void>;
   close(): Promise<void>;
 }
 
@@ -49,6 +54,7 @@ export interface PgChargerEventsOptions {
 export function pgChargerEvents(options: PgChargerEventsOptions): ChargerEvents {
   const { connect, reconnectDelayMs = 1_000, onError = () => undefined } = options;
   const listeners = new Map<string, Set<ChargerListener>>();
+  const everyCharger = new Set<ChargerListener>();
   let client: ListenClient | undefined;
   let connecting: Promise<void> | undefined;
   let reconnectTimer: NodeJS.Timeout | undefined;
@@ -56,6 +62,7 @@ export function pgChargerEvents(options: PgChargerEventsOptions): ChargerEvents 
 
   const notifyAll = (signal: ChargerSignal) => {
     for (const set of listeners.values()) for (const listener of set) listener(signal);
+    for (const listener of everyCharger) listener(signal);
   };
 
   const scheduleReconnect = () => {
@@ -89,7 +96,7 @@ export function pgChargerEvents(options: PgChargerEventsOptions): ChargerEvents 
         // Payloads that are not a valid event of this version are skipped.
         const event = parseChargerEvent(message.payload);
         if (event === undefined) return;
-        for (const listener of listeners.get(event.chargerId) ?? []) {
+        for (const listener of [...(listeners.get(event.chargerId) ?? []), ...everyCharger]) {
           listener({ kind: "event", event });
         }
       });
@@ -133,10 +140,24 @@ export function pgChargerEvents(options: PgChargerEventsOptions): ChargerEvents 
       }
       return unsubscribe;
     },
+    async subscribeAll(listener) {
+      everyCharger.add(listener);
+      const unsubscribe = () => {
+        everyCharger.delete(listener);
+      };
+      try {
+        await ensureConnected();
+      } catch (error) {
+        unsubscribe();
+        throw error;
+      }
+      return unsubscribe;
+    },
     async close() {
       closed = true;
       clearTimeout(reconnectTimer);
       listeners.clear();
+      everyCharger.clear();
       const current = client;
       client = undefined;
       await current?.end().catch(() => undefined);

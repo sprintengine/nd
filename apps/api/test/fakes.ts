@@ -1,7 +1,17 @@
-import { CHARGER_CONTROL_COMMANDS, type ChargerControl } from "@nd/domain";
+import {
+  CHARGER_CONTROL_COMMANDS,
+  type ChargerControl,
+  type ChargerControlCommand,
+  type ChargerControlResponse,
+  type ControlResult,
+} from "@nd/domain";
 import type { z } from "zod";
 
-import type { ChargerEvents, ChargerListener } from "../src/events/charger-events.ts";
+import type {
+  ChargerEvents,
+  ChargerListener,
+  ChargerSignal,
+} from "../src/events/charger-events.ts";
 import { type AnyJob, type JobRunner, runAttempt, type SendOptions } from "../src/jobs/jobs.ts";
 import type { EmailMessage, EmailSender, SmsMessage, SmsSender } from "../src/senders/senders.ts";
 import type { SavedCard, StripePayments } from "../src/stripe/payments.ts";
@@ -50,6 +60,7 @@ export function fakeStripe() {
 /** Charger events the test triggers by hand. */
 export function fakeChargerEvents() {
   const listeners = new Map<string, Set<ChargerListener>>();
+  const everyCharger = new Set<ChargerListener>();
   let closed = false;
   const events: ChargerEvents = {
     subscribe: (chargerId, listener) => {
@@ -58,6 +69,12 @@ export function fakeChargerEvents() {
       listeners.set(chargerId, set);
       return Promise.resolve(() => {
         set.delete(listener);
+      });
+    },
+    subscribeAll: (listener) => {
+      everyCharger.add(listener);
+      return Promise.resolve(() => {
+        everyCharger.delete(listener);
       });
     },
     close: () => {
@@ -72,6 +89,11 @@ export function fakeChargerEvents() {
         listener({ kind: "resync" });
       }
     },
+    /** Delivers a signal to the subscribers of every charger (and of its charger, for events). */
+    signal: (signal: ChargerSignal) => {
+      const own = signal.kind === "event" ? (listeners.get(signal.event.chargerId) ?? []) : [];
+      for (const listener of [...own, ...everyCharger]) listener(signal);
+    },
     subscribers: (chargerId: string) => listeners.get(chargerId)?.size ?? 0,
     isClosed: () => closed,
   };
@@ -84,6 +106,57 @@ export const rejectingChargerControl = Object.fromEntries(
     () => Promise.reject(new Error(`${command} is not expected in this test`)),
   ]),
 ) as unknown as ChargerControl;
+
+type AnyControlResult = ControlResult<ChargerControlResponse<ChargerControlCommand>>;
+
+/** What each command answers unless a test queues something else. */
+const ACCEPTED: { [C in ChargerControlCommand]: ChargerControlResponse<C> } = {
+  remoteStart: { status: "Accepted" },
+  remoteStop: { status: "Accepted" },
+  changeConfiguration: { status: "Accepted" },
+  getConfiguration: { configurationKey: [] },
+  triggerMessage: { status: "Accepted" },
+  reset: { status: "Accepted" },
+  unlockConnector: { status: "Unlocked" },
+};
+
+/**
+ * ChargerControl that records every command and answers Accepted, or with
+ * the results (or errors, which it throws) a test queues per command.
+ */
+export function scriptedChargerControl() {
+  const calls: { command: ChargerControlCommand; request: unknown }[] = [];
+  const queued = new Map<ChargerControlCommand, (AnyControlResult | Error)[]>();
+  const control = Object.fromEntries(
+    CHARGER_CONTROL_COMMANDS.map((command) => [
+      command,
+      (request: unknown) => {
+        calls.push({ command, request });
+        const next = queued.get(command)?.shift() ?? { ok: true, response: ACCEPTED[command] };
+        return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
+      },
+    ]),
+  ) as unknown as ChargerControl;
+  return {
+    control,
+    calls,
+    callsTo: (command: ChargerControlCommand) =>
+      calls.filter((call) => call.command === command).map((call) => call.request),
+    /** Queues the next answers to `command`. */
+    answer<C extends ChargerControlCommand>(
+      command: C,
+      ...results: (ControlResult<ChargerControlResponse<C>> | Error)[]
+    ) {
+      const list = queued.get(command) ?? [];
+      list.push(...(results as (AnyControlResult | Error)[]));
+      queued.set(command, list);
+    },
+    reset() {
+      calls.length = 0;
+      queued.clear();
+    },
+  };
+}
 
 /** A job sent to the in-memory runner. */
 export interface SentJob {
