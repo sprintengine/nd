@@ -1,7 +1,6 @@
 import { randomInt } from "node:crypto";
 
 import type { ChargerStatus, HostPayoutStatus } from "@nd/domain";
-import { hash, verify } from "@node-rs/argon2";
 
 /** Models a host can choose when connecting a charger. */
 export const CHARGER_MODELS = ["zappi", "zappi_glo"] as const;
@@ -60,16 +59,6 @@ export function newChargerSecret(): string {
 /** A new ChargeboxID: `ND` and 10 characters that are easy to read and type. */
 export function newChargeboxId(): string {
   return `ND${randomString(10, UPPER_ALPHANUMERIC)}`;
-}
-
-/** Hashes a charger secret with argon2id (PHC string, verifiable by any argon2 library). */
-export function hashChargerSecret(secret: string): Promise<string> {
-  return hash(secret);
-}
-
-/** Checks a charger secret against its stored hash. */
-export function verifyChargerSecret(storedHash: string, secret: string): Promise<boolean> {
-  return verify(storedHash, secret);
 }
 
 /** One unmet condition for publishing a listing. */

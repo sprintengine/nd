@@ -1,5 +1,4 @@
-import { chargers, findChargerCredentials, hosts } from "@nd/db";
-import { verify } from "@node-rs/argon2";
+import { chargers, findChargerCredentials, hosts, verifyChargerSecret } from "@nd/db";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -122,10 +121,12 @@ describe("POST /hosts/chargers", () => {
     const credentials = await findChargerCredentials(h.database.db, created.chargeboxId);
     expect(credentials?.ocppAuthHash).toMatch(/^\$argon2id\$/);
     expect(credentials?.ocppAuthHash).not.toContain(created.secret);
-    await expect(verify(credentials?.ocppAuthHash ?? "", created.secret)).resolves.toBe(true);
-    await expect(verify(credentials?.ocppAuthHash ?? "", "wrong-secret-value!!")).resolves.toBe(
-      false,
-    );
+    await expect(
+      verifyChargerSecret(created.secret, credentials?.ocppAuthHash ?? ""),
+    ).resolves.toBe(true);
+    await expect(
+      verifyChargerSecret("wrong-secret-value!!", credentials?.ocppAuthHash ?? ""),
+    ).resolves.toBe(false);
 
     const [row] = await h.database.db
       .select()
@@ -151,7 +152,9 @@ describe("POST /hosts/chargers", () => {
     expect(again.chargeboxId).toBe(first.chargeboxId);
     expect(again.secret).not.toBe(first.secret);
     const credentials = await findChargerCredentials(h.database.db, first.chargeboxId);
-    await expect(verify(credentials?.ocppAuthHash ?? "", first.secret)).resolves.toBe(false);
+    await expect(verifyChargerSecret(first.secret, credentials?.ocppAuthHash ?? "")).resolves.toBe(
+      false,
+    );
   });
 
   it("accepts a Zappi GLO whatever the serial", async () => {
@@ -180,14 +183,20 @@ describe("POST /hosts/chargers", () => {
 
 describe("GET /hosts/chargers/:id/onboarding", () => {
   it("resolves when the gateway notifies that the charger connected", async () => {
-    const { chargerId } = await connect(host, "21231111");
+    const { chargerId, chargeboxId } = await connect(host, "21231111");
     const started = Date.now();
     const pending = call("GET", `/hosts/chargers/${chargerId}/onboarding?wait=5`, host);
     await new Promise((resolve) => setTimeout(resolve, 300));
     await setOnline(chargerId);
-    await h.database.db.execute(
-      sql`select pg_notify('charger_events', ${JSON.stringify({ type: "charger.booted", chargerId })})`,
-    );
+    const event = {
+      v: 1,
+      type: "boot",
+      at: new Date().toISOString(),
+      chargerId,
+      chargeboxId,
+      firmware: "5.794",
+    };
+    await h.database.db.execute(sql`select pg_notify('charger_events', ${JSON.stringify(event)})`);
     const response = await pending;
     expect(Date.now() - started).toBeLessThan(4_000);
     expect(response.json()).toMatchObject({

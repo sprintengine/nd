@@ -1,4 +1,4 @@
-import type { Executor } from "@nd/db";
+import { type Executor, hashChargerSecret } from "@nd/db";
 import {
   chargerStatusSchema,
   connectorTypeSchema,
@@ -33,7 +33,6 @@ import {
   CHARGER_MODELS,
   eligibilityProblem,
   firmwareAtLeast,
-  hashChargerSecret,
   MIN_FIRMWARE,
   newChargeboxId,
   newChargerSecret,

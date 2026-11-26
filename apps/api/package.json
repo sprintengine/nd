@@ -23,7 +23,6 @@
     "@nd/config": "workspace:*",
     "@nd/db": "workspace:*",
     "@nd/domain": "workspace:*",
-    "@node-rs/argon2": "catalog:",
     "better-auth": "catalog:",
     "drizzle-orm": "catalog:",
     "fastify": "catalog:",

@@ -4,13 +4,11 @@ import {
   CHARGER_SECRET_LENGTH,
   eligibilityProblem,
   firmwareAtLeast,
-  hashChargerSecret,
   newChargeboxId,
   newChargerSecret,
   publishBlockers,
   randomString,
   storedModel,
-  verifyChargerSecret,
 } from "./rules.ts";
 
 describe("eligibilityProblem", () => {
@@ -75,13 +73,6 @@ describe("secrets", () => {
 
   it("draws from the given alphabet", () => {
     expect(randomString(30, "ab")).toMatch(/^[ab]{30}$/);
-  });
-
-  it("hashes with argon2id and verifies only the right secret", async () => {
-    const hash = await hashChargerSecret("correct-horse-battery");
-    expect(hash).toMatch(/^\$argon2id\$/);
-    await expect(verifyChargerSecret(hash, "correct-horse-battery")).resolves.toBe(true);
-    await expect(verifyChargerSecret(hash, "wrong")).resolves.toBe(false);
   });
 });
 

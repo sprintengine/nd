@@ -1,10 +1,10 @@
+import { verifyChargerSecret } from "@nd/db";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { fakeChargerEvents, fakeStripe } from "../../test/fakes.ts";
 import { SESSION_COOKIE, signInAs, startUnitApp, USER_ID } from "../../test/unit-app.ts";
 import * as data from "../data/hosts.ts";
-import { verifyChargerSecret } from "../hosts/rules.ts";
 
 vi.mock("../data/hosts.ts");
 
@@ -179,7 +179,7 @@ describe("POST /hosts/chargers", () => {
       timezone: "Europe/Dublin",
     });
     expect(JSON.stringify(inserted)).not.toContain(created.secret);
-    await expect(verifyChargerSecret(inserted?.ocppAuthHash ?? "", created.secret)).resolves.toBe(
+    await expect(verifyChargerSecret(created.secret, inserted?.ocppAuthHash ?? "")).resolves.toBe(
       true,
     );
   });
