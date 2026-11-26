@@ -57,9 +57,15 @@ export function whToKwh(wh: number): number {
   return Math.round(wh) / 1000;
 }
 
-/** When an open session of a slot ending at `slotEnd` is closed from its last MeterValue. */
-export function staleSessionCloseAt(slotEnd: Date): Date {
-  return new Date(slotEnd.getTime() + STALE_SESSION_GRACE_MINUTES * MINUTE_MS);
+/**
+ * When an open session of a slot ending at `slotEnd` is closed from its last
+ * MeterValue: `graceMinutes` (by default {@link STALE_SESSION_GRACE_MINUTES}) later.
+ */
+export function staleSessionCloseAt(
+  slotEnd: Date,
+  graceMinutes: number = STALE_SESSION_GRACE_MINUTES,
+): Date {
+  return new Date(slotEnd.getTime() + graceMinutes * MINUTE_MS);
 }
 
 /** When a session closed without a StopTransaction at `closedAt` is billed without the host. */

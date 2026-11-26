@@ -61,6 +61,7 @@ describe("times and units", () => {
   it("closes a stale session 10 minutes after the slot and waits 72 hours for the host", () => {
     const end = new Date("2027-01-12T06:00:00Z");
     expect(staleSessionCloseAt(end)).toEqual(new Date("2027-01-12T06:10:00Z"));
+    expect(staleSessionCloseAt(end, 1)).toEqual(new Date("2027-01-12T06:01:00Z"));
     expect(hostConfirmationDueAt(end)).toEqual(new Date("2027-01-15T06:00:00Z"));
     expect(HOST_CONFIRMATION_HOURS).toBe(72);
   });
