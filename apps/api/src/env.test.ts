@@ -63,14 +63,71 @@ describe("apiEnvSchema", () => {
     expect(() => parseEnv(apiEnvSchema, { ...required, NODE_ENV: "production" })).toThrow(
       /PUBLIC_API_URL[\s\S]*OCPP_WSS_URL/,
     );
-    expect(
-      apiEnvSchema.parse({
-        ...required,
-        NODE_ENV: "production",
-        PUBLIC_API_URL: "https://api.example.com",
-        OCPP_WSS_URL: "wss://ocpp.example.com/v16/",
-      }).NODE_ENV,
-    ).toBe("production");
+    expect(apiEnvSchema.parse(production).NODE_ENV).toBe("production");
+  });
+});
+
+/** A complete production environment. */
+const production = {
+  ...required,
+  NODE_ENV: "production",
+  PUBLIC_API_URL: "https://api.example.com",
+  OCPP_WSS_URL: "wss://ocpp.example.com/v16/",
+  EMAIL_PROVIDER: "smtp",
+  EMAIL_FROM: "nd <no-reply@example.com>",
+  SMTP_HOST: "smtp.example.com",
+  SMS_PROVIDER: "twilio",
+  TWILIO_ACCOUNT_SID: `AC${"0".repeat(32)}`,
+  TWILIO_AUTH_TOKEN: "token",
+  TWILIO_FROM: "+15005550006",
+};
+
+describe("message providers", () => {
+  it("refuse console senders in production", () => {
+    const run = () =>
+      parseEnv(apiEnvSchema, { ...production, EMAIL_PROVIDER: "", SMS_PROVIDER: "console" });
+    expect(run).toThrow(/EMAIL_PROVIDER[\s\S]*sends nothing[\s\S]*SMS_PROVIDER/);
+    expect(run).toThrow(/ALLOW_CONSOLE_MESSAGES=true/);
+  });
+
+  it("allow console senders in production only when asked to", () => {
+    const env = apiEnvSchema.parse({
+      ...production,
+      EMAIL_PROVIDER: "console",
+      SMS_PROVIDER: "console",
+      ALLOW_CONSOLE_MESSAGES: "true",
+    });
+    expect(env.EMAIL_PROVIDER).toBe("console");
+  });
+
+  it("need the settings of the chosen provider", () => {
+    expect(() => parseEnv(apiEnvSchema, { ...required, EMAIL_PROVIDER: "smtp" })).toThrow(
+      /EMAIL_FROM[\s\S]*SMTP_HOST/,
+    );
+    expect(() =>
+      parseEnv(apiEnvSchema, { ...required, EMAIL_PROVIDER: "resend", EMAIL_FROM: "a@b.c" }),
+    ).toThrow(/RESEND_API_KEY/);
+    expect(() =>
+      parseEnv(apiEnvSchema, { ...production, SMTP_USER: "mailer", SMTP_PASSWORD: "" }),
+    ).toThrow(/SMTP_PASSWORD/);
+    expect(() => parseEnv(apiEnvSchema, { ...required, SMS_PROVIDER: "twilio" })).toThrow(
+      /TWILIO_ACCOUNT_SID[\s\S]*TWILIO_AUTH_TOKEN[\s\S]*TWILIO_FROM/,
+    );
+    expect(() =>
+      parseEnv(apiEnvSchema, {
+        ...production,
+        TWILIO_MESSAGING_SERVICE_SID: `MG${"0".repeat(32)}`,
+      }),
+    ).toThrow(/one of TWILIO_FROM and TWILIO_MESSAGING_SERVICE_SID/);
+  });
+
+  it("check the sender and Twilio ids", () => {
+    expect(() => parseEnv(apiEnvSchema, { ...production, EMAIL_FROM: "nobody" })).toThrow(
+      /EMAIL_FROM/,
+    );
+    expect(() => parseEnv(apiEnvSchema, { ...production, TWILIO_ACCOUNT_SID: "AC1" })).toThrow(
+      /TWILIO_ACCOUNT_SID/,
+    );
   });
 });
 

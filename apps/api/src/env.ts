@@ -34,6 +34,19 @@ function optional<T extends z.ZodType>(schema: T) {
 
 const optionalSecret = optional(z.string().min(1));
 
+/** A value with a default, which an empty string also selects. */
+function orDefault<T extends z.ZodType>(schema: T) {
+  return z.preprocess((value) => (value === "" ? undefined : value), schema);
+}
+
+/** `name@domain` or `Display Name <name@domain>`, on one line. */
+const sender = z
+  .string()
+  .regex(
+    /^[^\r\n<>]*<[^\s@<>]+@[^\s@<>]+>$|^[^\s@<>]+@[^\s@<>]+$/,
+    "must be an address or Name <address>",
+  );
+
 /**
  * Environment the API reads at start-up. Every value is validated here, so a
  * missing or malformed variable stops the process with a readable message.
@@ -67,10 +80,31 @@ export const apiEnvSchema = z
     APPLE_APP_BUNDLE_ID: optional(z.string().min(1)),
     GOOGLE_CLIENT_ID: optionalSecret,
     GOOGLE_CLIENT_SECRET: optionalSecret,
-    /** Where sign-in emails go. Only `console` exists so far. */
-    EMAIL_PROVIDER: z.enum(["console"]).default("console"),
-    /** Where phone codes go. Only `console` exists so far. */
-    SMS_PROVIDER: z.enum(["console"]).default("console"),
+    /** How email is sent: `smtp`, `resend`, or `console` (written to the log; development). */
+    EMAIL_PROVIDER: orDefault(z.enum(["console", "smtp", "resend"]).default("console")),
+    /** Sender of every email, e.g. `nd <no-reply@example.com>`. Required by smtp and resend. */
+    EMAIL_FROM: optional(sender),
+    SMTP_HOST: optional(z.string().min(1)),
+    SMTP_PORT: port.default(587),
+    /** TLS from the first byte (port 465). Otherwise STARTTLS is required. Defaults to true on 465. */
+    SMTP_SECURE: optional(z.enum(["true", "false"])),
+    SMTP_USER: optionalSecret,
+    SMTP_PASSWORD: optionalSecret,
+    RESEND_API_KEY: optionalSecret,
+    /** How phone codes are sent: `twilio`, or `console` (development). */
+    SMS_PROVIDER: orDefault(z.enum(["console", "twilio"]).default("console")),
+    TWILIO_ACCOUNT_SID: optional(
+      z.string().regex(/^AC[0-9a-fA-F]{32}$/, "must be AC and 32 hex digits"),
+    ),
+    TWILIO_AUTH_TOKEN: optionalSecret,
+    /** Sender number (E.164) or alphanumeric sender id… */
+    TWILIO_FROM: optional(z.string().min(1)),
+    /** …or a Messaging Service to send through. */
+    TWILIO_MESSAGING_SERVICE_SID: optional(
+      z.string().regex(/^MG[0-9a-fA-F]{32}$/, "must be MG and 32 hex digits"),
+    ),
+    /** Lets production start with console senders (they send nothing), e.g. for end-to-end tests. */
+    ALLOW_CONSOLE_MESSAGES: z.enum(["true", "false"]).default("false"),
     /** Stripe secret key; without it, becoming a host answers 503. */
     STRIPE_SECRET_KEY: optionalSecret,
     /** Signing secret of the Stripe webhook endpoint; without it POST /webhooks/stripe answers 503. */
@@ -108,7 +142,48 @@ export const apiEnvSchema = z
         });
       }
     }
+    const need = (name: keyof typeof env, because: string) => {
+      if (env[name] === undefined) {
+        context.addIssue({ code: "custom", path: [name], message: `required ${because}` });
+      }
+    };
+    if (env.EMAIL_PROVIDER !== "console")
+      need("EMAIL_FROM", `with EMAIL_PROVIDER=${env.EMAIL_PROVIDER}`);
+    if (env.EMAIL_PROVIDER === "smtp") need("SMTP_HOST", "with EMAIL_PROVIDER=smtp");
+    if (env.EMAIL_PROVIDER === "resend") need("RESEND_API_KEY", "with EMAIL_PROVIDER=resend");
+    if ((env.SMTP_USER === undefined) !== (env.SMTP_PASSWORD === undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["SMTP_PASSWORD"],
+        message: "set both SMTP_USER and SMTP_PASSWORD, or neither",
+      });
+    }
+    if (env.SMS_PROVIDER === "twilio") {
+      need("TWILIO_ACCOUNT_SID", "with SMS_PROVIDER=twilio");
+      need("TWILIO_AUTH_TOKEN", "with SMS_PROVIDER=twilio");
+      if ((env.TWILIO_FROM === undefined) === (env.TWILIO_MESSAGING_SERVICE_SID === undefined)) {
+        context.addIssue({
+          code: "custom",
+          path: ["TWILIO_FROM"],
+          message:
+            "set one of TWILIO_FROM and TWILIO_MESSAGING_SERVICE_SID with SMS_PROVIDER=twilio",
+        });
+      }
+    }
     if (env.NODE_ENV === "production") {
+      // Fail fast rather than run with sign-in links and codes going nowhere.
+      if (env.ALLOW_CONSOLE_MESSAGES !== "true") {
+        for (const name of ["EMAIL_PROVIDER", "SMS_PROVIDER"] as const) {
+          if (env[name] === "console") {
+            context.addIssue({
+              code: "custom",
+              path: [name],
+              message:
+                "is console, which sends nothing: choose a real provider in production, or set ALLOW_CONSOLE_MESSAGES=true to run without one",
+            });
+          }
+        }
+      }
       if (!env.PUBLIC_API_URL.startsWith("https://")) {
         context.addIssue({
           code: "custom",

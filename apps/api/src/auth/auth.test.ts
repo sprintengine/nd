@@ -60,9 +60,10 @@ describe("createAuth", () => {
     await plugin("phone-number").sendOTP?.({ phoneNumber: "+353861234567", code: "123456" });
     expect(mail.emails[0]).toMatchObject({ to: "dev@example.com" });
     expect(mail.emails[0]?.text).toContain("token=t");
+    expect(mail.emails[0]?.html).toContain("token=t");
     expect(mail.texts[0]).toEqual({
       to: "+353861234567",
-      body: "Your verification code is 123456",
+      body: "Your verification code is 123456. It expires in 5 minutes. Never share it with anyone.",
     });
   });
 

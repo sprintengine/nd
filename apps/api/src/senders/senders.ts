@@ -1,8 +1,9 @@
-/** An email to one recipient. */
+/** An email to one recipient: plain text, and optionally the same content as HTML. */
 export interface EmailMessage {
   readonly to: string;
   readonly subject: string;
   readonly text: string;
+  readonly html?: string;
 }
 
 /** A text message to one phone number (E.164). */
@@ -11,12 +12,12 @@ export interface SmsMessage {
   readonly body: string;
 }
 
-/** Sends email. Real providers plug in behind this; dev and tests use the console one. */
+/** Sends email: SMTP or Resend in production (`from-env.ts`), the console in development and tests. */
 export interface EmailSender {
   send(message: EmailMessage): Promise<void>;
 }
 
-/** Sends text messages. Real providers plug in behind this; dev and tests use the console one. */
+/** Sends text messages: Twilio in production, the console in development and tests. */
 export interface SmsSender {
   send(message: SmsMessage): Promise<void>;
 }
@@ -30,8 +31,8 @@ const defaultSink: ConsoleSink = (line) => {
 
 /**
  * Writes emails to the console instead of sending them, for local development.
- * With `redact` (production without a provider) only the fact that a message
- * was dropped is written, never its content or recipient.
+ * With `redact` (production running with ALLOW_CONSOLE_MESSAGES) only the fact
+ * that a message was dropped is written, never its content or recipient.
  */
 export function consoleEmailSender(
   options: { redact?: boolean; sink?: ConsoleSink } = {},

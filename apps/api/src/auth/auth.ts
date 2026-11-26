@@ -8,6 +8,7 @@ import { phoneNumber } from "better-auth/plugins/phone-number";
 import type { IdGenerator } from "../deps.ts";
 import type { ApiConfig } from "../env.ts";
 import type { EmailSender, SmsSender } from "../senders/senders.ts";
+import { magicLinkEmail, phoneCodeSms } from "../senders/templates.ts";
 
 /** Path Better Auth is mounted under. */
 export const AUTH_BASE_PATH = "/auth";
@@ -108,8 +109,7 @@ export function createAuth({ config, db, ids, email, sms }: AuthDeps) {
         sendMagicLink: async ({ email: to, url }) => {
           await email.send({
             to,
-            subject: "Your sign-in link",
-            text: `Sign in with this link. It works once and expires in 15 minutes.\n\n${url}\n\nIf you did not ask for it, ignore this email.`,
+            ...magicLinkEmail({ url, expiresInMinutes: MAGIC_LINK_EXPIRES_IN_S / 60 }),
           });
         },
       }),
@@ -119,7 +119,10 @@ export function createAuth({ config, db, ids, email, sms }: AuthDeps) {
         allowedAttempts: 3,
         phoneNumberValidator: (value) => E164.test(value),
         sendOTP: async ({ phoneNumber: to, code }) => {
-          await sms.send({ to, body: `Your verification code is ${code}` });
+          await sms.send({
+            to,
+            body: phoneCodeSms({ code, expiresInMinutes: PHONE_OTP_EXPIRES_IN_S / 60 }),
+          });
         },
         schema: {
           user: { fields: { phoneNumber: "phone", phoneNumberVerified: "phoneVerified" } },

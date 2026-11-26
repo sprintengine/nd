@@ -7,7 +7,7 @@ import { createPgChargerEvents } from "./events/charger-events.ts";
 import { apiEnvSchema, buildApp, configFromEnv, loggerOptions } from "./index.ts";
 import { createPgBossRunner } from "./jobs/pg-boss.ts";
 import { createDatabaseProbe, registerReadiness } from "./readiness.ts";
-import { consoleEmailSender, consoleSmsSender } from "./senders/senders.ts";
+import { sendersFromEnv } from "./senders/from-env.ts";
 import { closeOnSignal } from "./shutdown.ts";
 import { stripePaymentsFrom, unconfiguredStripePayments } from "./stripe/payments.ts";
 import { createStripeSdk, stripeConnectFrom, unconfiguredStripeConnect } from "./stripe/stripe.ts";
@@ -21,15 +21,14 @@ const stripeSdk =
     ? undefined
     : createStripeSdk(env.STRIPE_SECRET_KEY, env.STRIPE_API_BASE_URL);
 
-// Real email and SMS providers plug in here. Until then, production writes
-// only that a message was dropped, never a link or code.
+const { email, sms } = sendersFromEnv(env);
 const app = buildApp({
   config,
   database,
   clock: systemClock,
   ids: randomIds,
-  email: consoleEmailSender({ redact: config.production }),
-  sms: consoleSmsSender({ redact: config.production }),
+  email,
+  sms,
   stripe: stripeSdk === undefined ? unconfiguredStripeConnect : stripeConnectFrom(stripeSdk),
   payments: stripeSdk === undefined ? unconfiguredStripePayments : stripePaymentsFrom(stripeSdk),
   // pg-boss in its own schema of the same database; started and stopped with the app.
