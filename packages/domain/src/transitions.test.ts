@@ -29,6 +29,8 @@ describe("booking transitions", () => {
     ["arrived", "active"],
     ["active", "completed"],
     ["confirmed", "no_show"],
+    ["arrived", "completed"],
+    ["arrived", "no_show"],
   ] as const)("allow %s -> %s", (from, to) => {
     expect(canTransitionBooking(from, to)).toBe(true);
   });
@@ -37,6 +39,7 @@ describe("booking transitions", () => {
     ["active", "cancelled"],
     ["completed", "active"],
     ["requested", "active"],
+    ["arrived", "cancelled"],
   ] as const)("refuse %s -> %s", (from, to) => {
     expect(canTransitionBooking(from, to)).toBe(false);
   });

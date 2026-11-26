@@ -8,7 +8,9 @@ import type { BookingStatus, PaymentStatus, SessionStatus, TransferStatus } from
 export const BOOKING_TRANSITIONS = {
   requested: ["confirmed", "cancelled"],
   confirmed: ["arrived", "cancelled", "no_show"],
-  arrived: ["active"],
+  // An arrival that never became a session is closed after the slot: completed
+  // when a start was attempted or the car plugged in, otherwise a no-show.
+  arrived: ["active", "completed", "no_show"],
   active: ["completed"],
   completed: [],
   cancelled: [],
