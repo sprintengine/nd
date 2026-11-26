@@ -59,8 +59,11 @@ engineStrict: true
 onlyBuiltDependencies:
   - lefthook
 
-# drizzle-kit (development only) still pulls in a deprecated loader that pins
-# esbuild 0.18, which has a moderate advisory (GHSA-67mh-4wv8-2f99). Force a
-# patched esbuild there; drizzle-kit's own commands are unaffected.
+# drizzle-kit (a development tool) asks for esbuild 0.25 and pulls in a
+# deprecated loader that pins esbuild 0.18. Both are old Go builds with known
+# advisories, and drizzle-kit still reaches the api image as one of
+# better-auth's optional peers. Give both the esbuild that vite and tsx use;
+# drizzle-kit's commands are unaffected.
 overrides:
-  "@esbuild-kit/core-utils>esbuild": 0.25.12
+  "@esbuild-kit/core-utils>esbuild": 0.28.2
+  drizzle-kit>esbuild: 0.28.2
