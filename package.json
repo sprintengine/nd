@@ -14,6 +14,8 @@
     "typecheck:root": "tsc",
     "db:up": "docker compose -f docker-compose.dev.yml up -d --wait",
     "db:down": "docker compose -f docker-compose.dev.yml down",
+    "db:migrate": "pnpm --filter @nd/db db:migrate",
+    "db:seed": "pnpm --filter @nd/db db:seed",
     "lint": "turbo run lint lint:root",
     "lint:root": "eslint . --ignore-pattern \"apps/**\" --ignore-pattern \"packages/**\"",
     "format": "prettier --write .",
