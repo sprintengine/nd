@@ -4,7 +4,7 @@ import { hostTransferJob } from "../bookings/jobs.ts";
 import { hourlyPriceOf } from "../bookings/rules.ts";
 import { findBookingDetail, updateBookingFrom } from "../data/bookings.ts";
 import { billedSessionOf, hasAnySession } from "../data/settlement.ts";
-import { captureForBooking, releaseAuthorisation } from "../payments/settlement.ts";
+import { captureForBooking, releaseCardHold } from "../payments/settlement.ts";
 import type { SettlementServices } from "./services.ts";
 
 // A driver who checked in ("I'm here") but never got a charging session
@@ -31,7 +31,7 @@ export async function closeArrivedBooking(
 
   const attempted = booking.pluggedInAt !== null || (await hasAnySession(services.db, bookingId));
   if (attempted) {
-    await releaseAuthorisation(services, bookingId, payment);
+    await releaseCardHold(services, bookingId, payment);
     await updateBookingFrom(services.db, bookingId, ["arrived"], { status: "completed" });
     services.realtime.bookingChanged(bookingId);
     return "completed";
@@ -51,7 +51,7 @@ export async function closeArrivedBooking(
       { singletonKey: captured.paymentId },
     );
   } else {
-    await releaseAuthorisation(services, bookingId, payment);
+    await releaseCardHold(services, bookingId, payment);
   }
   await updateBookingFrom(services.db, bookingId, ["arrived"], {
     status: "no_show",

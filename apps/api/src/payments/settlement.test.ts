@@ -7,7 +7,7 @@ import {
   captureForBooking,
   createHostTransfer,
   PaymentStateError,
-  releaseAuthorisation,
+  releaseCardHold,
   transferHoldReason,
 } from "./settlement.ts";
 
@@ -94,6 +94,25 @@ describe("captureForBooking", () => {
     );
   });
 
+  it("only releases a hold that the stored payment says is still authorised", async () => {
+    // 0 is the caller's choice (support may waive a session), but whether a
+    // hold is released depends on the payment row alone.
+    vi.mocked(data.findBookingDetail).mockResolvedValue(
+      bookingDetail("user-cian", {
+        payment: { status: "captured", capturedCents: 600, stripeChargeId: "ch_1" },
+      }),
+    );
+    await expect(captureForBooking(env.services, BOOKING_ID, 0)).rejects.toThrow(PaymentStateError);
+    vi.mocked(data.findBookingDetail).mockResolvedValue(
+      bookingDetail("user-cian", { payment: { status: "card_saved" } }),
+    );
+    await expect(captureForBooking(env.services, BOOKING_ID, 0)).rejects.toThrow(
+      /no authorisation/,
+    );
+    expect(env.payments.callsTo("cancelAuthorisation")).toHaveLength(0);
+    expect(data.updatePaymentFrom).not.toHaveBeenCalled();
+  });
+
   it("needs an authorised payment", async () => {
     vi.mocked(data.findBookingDetail).mockResolvedValue(
       bookingDetail("user-cian", { payment: null }),
@@ -110,9 +129,9 @@ describe("captureForBooking", () => {
   });
 });
 
-describe("releaseAuthorisation", () => {
+describe("releaseCardHold", () => {
   it("cancels a held authorisation and marks the payment cancelled", async () => {
-    await releaseAuthorisation(env.services, BOOKING_ID, payment());
+    await releaseCardHold(env.services, BOOKING_ID, payment());
     expect(env.payments.callsTo("cancelAuthorisation")).toHaveLength(1);
     expect(data.updatePaymentFrom).toHaveBeenCalledWith(
       expect.anything(),
@@ -123,8 +142,8 @@ describe("releaseAuthorisation", () => {
   });
 
   it("only marks a saved card cancelled, and ignores a missing payment", async () => {
-    await releaseAuthorisation(env.services, BOOKING_ID, payment({ status: "card_saved" }));
-    await releaseAuthorisation(env.services, BOOKING_ID, null);
+    await releaseCardHold(env.services, BOOKING_ID, payment({ status: "card_saved" }));
+    await releaseCardHold(env.services, BOOKING_ID, null);
     expect(env.payments.callsTo("cancelAuthorisation")).toHaveLength(0);
     expect(data.updatePaymentFrom).toHaveBeenCalledTimes(1);
   });

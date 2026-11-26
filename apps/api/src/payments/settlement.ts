@@ -75,7 +75,7 @@ export async function captureForBooking(
     );
   }
   if (amountCents === 0) {
-    await releaseAuthorisation(services, bookingId, payment);
+    await releaseCardHold(services, bookingId, payment);
     return { paymentId: payment.id, capturedCents: 0, chargeId: null };
   }
   const captured = await services.payments.capture({
@@ -93,11 +93,11 @@ export async function captureForBooking(
 }
 
 /**
- * Lets go of a booking's payment without charging: releases a held
- * authorisation, and marks a saved-card or pending payment cancelled.
- * Captured and failed payments are left alone.
+ * Lets go of a booking's payment without charging: releases the hold on the
+ * driver's card (a manual-capture authorisation), and marks a saved-card or
+ * pending payment cancelled. Captured and failed payments are left alone.
  */
-export async function releaseAuthorisation(
+export async function releaseCardHold(
   services: Services,
   bookingId: string,
   payment: Pick<Payment, "id" | "status" | "stripePaymentIntentId"> | null,

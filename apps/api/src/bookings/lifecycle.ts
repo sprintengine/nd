@@ -21,7 +21,7 @@ import {
 import { chargerRules } from "../data/listing.ts";
 import { HttpProblem } from "../http/problem.ts";
 import type { JobAttempt } from "../jobs/jobs.ts";
-import { captureForBooking, paymentKeys, releaseAuthorisation } from "../payments/settlement.ts";
+import { captureForBooking, paymentKeys, releaseCardHold } from "../payments/settlement.ts";
 import type { Services } from "../services.ts";
 import { authoriseBookingJob, expireRequestJob, hostTransferJob, noShowJob } from "./jobs.ts";
 import {
@@ -303,7 +303,7 @@ export async function declineBooking(
 ): Promise<void> {
   const detail = await hostsBooking(services, userId, bookingId);
   if (detail.booking.status !== "requested") throw notRequested();
-  await releaseAuthorisation(services, bookingId, detail.payment);
+  await releaseCardHold(services, bookingId, detail.payment);
   const changed = await updateBookingFrom(services.db, bookingId, ["requested"], {
     status: "cancelled",
     cancelledAt: services.clock.now(),
@@ -367,7 +367,7 @@ export async function cancelBooking(
       { singletonKey: captured.paymentId },
     );
   } else {
-    await releaseAuthorisation(services, bookingId, payment);
+    await releaseCardHold(services, bookingId, payment);
   }
   const changed = await updateBookingFrom(services.db, bookingId, [booking.status], {
     status: "cancelled",
@@ -460,7 +460,7 @@ export async function markNoShow(services: Services, bookingId: string): Promise
       { singletonKey: captured.paymentId },
     );
   } else {
-    await releaseAuthorisation(services, bookingId, payment);
+    await releaseCardHold(services, bookingId, payment);
   }
   await updateBookingFrom(services.db, bookingId, ["confirmed"], {
     status: "no_show",
@@ -476,7 +476,7 @@ export async function expireRequest(services: Services, bookingId: string): Prom
   const detail = await findBookingDetail(services.db, bookingId);
   if (detail?.booking.status !== "requested") return;
   if (services.clock.now().getTime() < detail.booking.slot.start.getTime()) return;
-  await releaseAuthorisation(services, bookingId, detail.payment);
+  await releaseCardHold(services, bookingId, detail.payment);
   await updateBookingFrom(services.db, bookingId, ["requested"], {
     status: "cancelled",
     cancelledAt: services.clock.now(),
