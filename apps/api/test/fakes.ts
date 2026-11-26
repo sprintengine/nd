@@ -1,4 +1,5 @@
-import type { ChargerControl } from "../src/charger-control.ts";
+import { CHARGER_CONTROL_COMMANDS, type ChargerControl } from "@nd/domain";
+
 import type { ChargerEvents, ChargerListener } from "../src/events/charger-events.ts";
 import type { EmailMessage, EmailSender, SmsMessage, SmsSender } from "../src/senders/senders.ts";
 import type { StripeConnect } from "../src/stripe/stripe.ts";
@@ -65,7 +66,7 @@ export function fakeChargerEvents() {
     events,
     emit: (chargerId: string) => {
       for (const listener of listeners.get(chargerId) ?? []) {
-        listener({ kind: "event", chargerId, type: "boot" });
+        listener({ kind: "resync" });
       }
     },
     subscribers: (chargerId: string) => listeners.get(chargerId)?.size ?? 0,
@@ -73,8 +74,10 @@ export function fakeChargerEvents() {
   };
 }
 
-export const rejectingChargerControl: ChargerControl = {
-  remoteStart: () => Promise.reject(new Error("not used")),
-  remoteStop: () => Promise.reject(new Error("not used")),
-  triggerMessage: () => Promise.reject(new Error("not used")),
-};
+/** ChargerControl for tests that never send a command: every command rejects. */
+export const rejectingChargerControl = Object.fromEntries(
+  CHARGER_CONTROL_COMMANDS.map((command) => [
+    command,
+    () => Promise.reject(new Error(`${command} is not expected in this test`)),
+  ]),
+) as unknown as ChargerControl;

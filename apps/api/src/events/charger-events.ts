@@ -1,17 +1,14 @@
+import { CHARGER_EVENTS_CHANNEL, type ChargerEvent, parseChargerEvent } from "@nd/domain";
 import pg from "pg";
-import { z } from "zod";
-
-/** Postgres channel the OCPP gateway notifies on. Payloads carry ids only. */
-export const CHARGER_EVENTS_CHANNEL = "charger_events";
 
 /**
- * What a subscriber hears: an event about its charger, or `resync` after the
- * connection to Postgres was re-established. NOTIFY is not durable, so on
- * `resync` a subscriber must re-read the tables for anything it missed.
+ * What a subscriber hears: an event about its charger (the gateway's
+ * versioned `@nd/domain` contract), or `resync` after the connection to
+ * Postgres was re-established. NOTIFY is not durable, so on `resync` a
+ * subscriber must re-read the tables for anything it missed.
  */
 export type ChargerSignal =
-  | { readonly kind: "event"; readonly chargerId: string; readonly type: string | undefined }
-  | { readonly kind: "resync" };
+  { readonly kind: "event"; readonly event: ChargerEvent } | { readonly kind: "resync" };
 
 export type ChargerListener = (signal: ChargerSignal) => void;
 
@@ -24,32 +21,6 @@ export interface ChargerEvents {
    */
   subscribe(chargerId: string, listener: ChargerListener): Promise<() => void>;
   close(): Promise<void>;
-}
-
-/**
- * The NOTIFY payload, as far as the API needs it: JSON with the charger's id.
- * Other fields (the event type, row ids) are passed through or ignored.
- */
-const payloadSchema = z.union([
-  z.looseObject({ chargerId: z.string().min(1), type: z.string().optional() }),
-  z
-    .looseObject({ charger_id: z.string().min(1), type: z.string().optional() })
-    .transform(({ charger_id, type }) => ({ chargerId: charger_id, type })),
-]);
-
-/** Reads the charger id out of a NOTIFY payload; undefined if it has none. */
-export function parseChargerEventPayload(
-  payload: string | undefined,
-): { chargerId: string; type: string | undefined } | undefined {
-  if (payload === undefined) return undefined;
-  let json: unknown;
-  try {
-    json = JSON.parse(payload);
-  } catch {
-    return undefined;
-  }
-  const result = payloadSchema.safeParse(json);
-  return result.success ? { chargerId: result.data.chargerId, type: result.data.type } : undefined;
 }
 
 /** The part of a `pg.Client` the listener uses. */
@@ -115,10 +86,11 @@ export function pgChargerEvents(options: PgChargerEventsOptions): ChargerEvents 
       const next = connect();
       next.on("notification", (message) => {
         if (message.channel !== CHARGER_EVENTS_CHANNEL) return;
-        const parsed = parseChargerEventPayload(message.payload);
-        if (parsed === undefined) return;
-        for (const listener of listeners.get(parsed.chargerId) ?? []) {
-          listener({ kind: "event", chargerId: parsed.chargerId, type: parsed.type });
+        // Payloads that are not a valid event of this version are skipped.
+        const event = parseChargerEvent(message.payload);
+        if (event === undefined) return;
+        for (const listener of listeners.get(event.chargerId) ?? []) {
+          listener({ kind: "event", event });
         }
       });
       next.on("error", (error) => {

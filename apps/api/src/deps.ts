@@ -1,7 +1,7 @@
 import type { Database } from "@nd/db";
+import type { ChargerControl } from "@nd/domain";
 import type { FastifyServerOptions } from "fastify";
 
-import type { ChargerControl } from "./charger-control.ts";
 import type { ApiConfig } from "./env.ts";
 import type { ChargerEvents } from "./events/charger-events.ts";
 import type { EmailSender, SmsSender } from "./senders/senders.ts";

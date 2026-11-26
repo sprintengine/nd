@@ -6,6 +6,7 @@ import { apiEnvSchema, configFromEnv } from "./env.ts";
 const required = {
   DATABASE_URL: "postgres://nd:nd@localhost:5432/nd",
   AUTH_SECRET: "x".repeat(32),
+  GATEWAY_INTERNAL_SECRET: "g".repeat(32),
 };
 
 describe("apiEnvSchema", () => {
@@ -19,6 +20,7 @@ describe("apiEnvSchema", () => {
       CORS_ORIGINS: [],
       OCPP_WSS_URL: "ws://localhost:9000/v16/",
       ONBOARDING_WAIT_MAX_SECONDS: 25,
+      GATEWAY_INTERNAL_URL: "http://localhost:9100",
       EMAIL_PROVIDER: "console",
       SMS_PROVIDER: "console",
     });

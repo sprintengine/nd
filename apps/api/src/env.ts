@@ -83,6 +83,10 @@ export const apiEnvSchema = z
         "must end with a slash: myenergi appends the ChargeboxID",
       )
       .default("ws://localhost:9000/v16/"),
+    /** Base URL of the OCPP gateway's internal ChargerControl endpoint. */
+    GATEWAY_INTERNAL_URL: z.url({ protocol: /^https?$/ }).default("http://localhost:9100"),
+    /** Bearer secret for ChargerControl, shared with the gateway. At least 32 characters. */
+    GATEWAY_INTERNAL_SECRET: z.string().min(32),
     /** Longest the onboarding long-poll waits for the charger to connect, in seconds. */
     ONBOARDING_WAIT_MAX_SECONDS: z.coerce.number().int().min(1).max(120).default(25),
   })

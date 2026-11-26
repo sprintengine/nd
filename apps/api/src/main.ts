@@ -1,7 +1,7 @@
 import { parseEnv } from "@nd/config";
 import { createDb } from "@nd/db";
+import { createChargerControlClient } from "@nd/domain";
 
-import { unavailableChargerControl } from "./charger-control.ts";
 import { randomIds, systemClock } from "./deps.ts";
 import { createPgChargerEvents } from "./events/charger-events.ts";
 import { apiEnvSchema, buildApp, configFromEnv, loggerOptions } from "./index.ts";
@@ -28,7 +28,10 @@ const app = buildApp({
     env.STRIPE_SECRET_KEY === undefined
       ? unconfiguredStripeConnect
       : createStripeConnect(env.STRIPE_SECRET_KEY, env.STRIPE_API_BASE_URL),
-  chargerControl: unavailableChargerControl,
+  chargerControl: createChargerControlClient({
+    baseUrl: env.GATEWAY_INTERNAL_URL,
+    secret: env.GATEWAY_INTERNAL_SECRET,
+  }),
   chargerEvents: createPgChargerEvents(env.DATABASE_URL, (error) => {
     app.log.warn({ err: error }, "charger events connection failed; reconnecting");
   }),

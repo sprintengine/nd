@@ -1,15 +1,14 @@
 import { EventEmitter } from "node:events";
 
+import { CHARGER_EVENTS_CHANNEL } from "@nd/domain";
 import type pg from "pg";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  CHARGER_EVENTS_CHANNEL,
   type ChargerEvents,
   type ChargerSignal,
   createPgChargerEvents,
   type ListenClient,
-  parseChargerEventPayload,
   pgChargerEvents,
   waitForCharger,
 } from "./charger-events.ts";
@@ -38,23 +37,17 @@ class FakeClient extends EventEmitter implements ListenClient {
   }
 }
 
-describe("parseChargerEventPayload", () => {
-  it("reads the charger id in either case style", () => {
-    expect(parseChargerEventPayload('{"chargerId":"c1","type":"boot"}')).toEqual({
-      chargerId: "c1",
-      type: "boot",
-    });
-    expect(parseChargerEventPayload('{"charger_id":"c2","messageId":"m"}')).toEqual({
-      chargerId: "c2",
-      type: undefined,
-    });
-  });
+const C1 = "11111111-1111-4111-8111-111111111111";
+const C2 = "22222222-2222-4222-8222-222222222222";
 
-  it("ignores payloads without one", () => {
-    expect(parseChargerEventPayload(undefined)).toBeUndefined();
-    expect(parseChargerEventPayload("not json")).toBeUndefined();
-    expect(parseChargerEventPayload('{"sessionId":"s1"}')).toBeUndefined();
-  });
+/** A boot event as the gateway publishes it. */
+const boot = (chargerId: string) => ({
+  v: 1,
+  type: "boot",
+  at: "2027-01-11T12:00:00.000Z",
+  chargerId,
+  chargeboxId: "NDTEST000001",
+  firmware: "5.794",
 });
 
 describe("pgChargerEvents", () => {
@@ -69,23 +62,24 @@ describe("pgChargerEvents", () => {
     });
     const heard: ChargerSignal[] = [];
     const other: ChargerSignal[] = [];
-    const stop = await events.subscribe("c1", (signal) => heard.push(signal));
-    await events.subscribe("c2", (signal) => other.push(signal));
+    const stop = await events.subscribe(C1, (signal) => heard.push(signal));
+    await events.subscribe(C2, (signal) => other.push(signal));
     expect(clients).toHaveLength(1);
     expect(clients[0]?.queries).toEqual(["LISTEN charger_events"]);
 
-    clients[0]?.notify(JSON.stringify({ chargerId: "c1", type: "boot" }));
-    clients[0]?.notify(JSON.stringify({ chargerId: "c1" }), "something_else");
+    clients[0]?.notify(JSON.stringify(boot(C1)));
+    clients[0]?.notify(JSON.stringify(boot(C1)), "something_else");
+    clients[0]?.notify(JSON.stringify({ ...boot(C1), v: 2 }));
     clients[0]?.notify("garbage");
-    expect(heard).toEqual([{ kind: "event", chargerId: "c1", type: "boot" }]);
+    expect(heard).toEqual([{ kind: "event", event: boot(C1) }]);
     expect(other).toEqual([]);
 
     stop();
-    clients[0]?.notify(JSON.stringify({ chargerId: "c1" }));
+    clients[0]?.notify(JSON.stringify(boot(C1)));
     expect(heard).toHaveLength(1);
     await events.close();
     expect(clients[0]?.ended).toBe(true);
-    await expect(events.subscribe("c1", () => undefined)).rejects.toThrow(/closed/);
+    await expect(events.subscribe(C1, () => undefined)).rejects.toThrow(/closed/);
   });
 
   it("reconnects after the connection drops and tells subscribers to resync", async () => {
@@ -103,14 +97,14 @@ describe("pgChargerEvents", () => {
         onError: (error) => errors.push(error),
       });
       const heard: ChargerSignal[] = [];
-      await events.subscribe("c1", (signal) => heard.push(signal));
+      await events.subscribe(C1, (signal) => heard.push(signal));
       clients[0]?.emit("error", new Error("connection reset"));
       clients[0]?.emit("end");
       expect(errors).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(20);
       expect(clients).toHaveLength(2);
       expect(heard).toEqual([{ kind: "resync" }]);
-      clients[1]?.notify(JSON.stringify({ chargerId: "c1" }));
+      clients[1]?.notify(JSON.stringify(boot(C1)));
       expect(heard).toHaveLength(2);
       await events.close();
     } finally {
