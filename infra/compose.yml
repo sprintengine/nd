@@ -1,0 +1,145 @@
+# Production stack for the reference deployment: one VM running Docker
+# Compose behind Cloudflare. See docs/DEPLOY.md and docs/RUNBOOK.md.
+#
+#   cp infra/.env.example infra/.env   # then fill it in
+#   docker compose -f infra/compose.yml up -d --wait
+#
+# Compose reads infra/.env (next to this file) for the ${...} values below.
+# Each service gets only the variables it needs, never the whole file.
+name: nd
+
+x-app: &app
+  restart: unless-stopped
+  # Nothing in the app images is written at runtime.
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  # The apps close their servers and pools on SIGTERM within 10 s.
+  stop_grace_period: 15s
+  logging: &logging
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "5"
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  caddy:
+    image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in infra/.env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in infra/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Cloudflare Origin CA certificate for app. and api. (docs/DEPLOY.md).
+      - ./certs:/etc/caddy/certs:ro
+      # ACME account and the ocpp. certificate. Keep this volume: losing it
+      # means re-issuing, and Let's Encrypt rate-limits re-issues.
+      - caddy-data:/data
+      - caddy-config:/config
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging: *logging
+    networks: [edge]
+    depends_on:
+      api:
+        condition: service_started
+      ocpp-gateway:
+        condition: service_started
+
+  api:
+    <<: *app
+    image: ${ND_IMAGE_PREFIX:-ghcr.io/sprintengine}/nd-api:${ND_IMAGE_TAG:-main}
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-nd}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env}@postgres:5432/${POSTGRES_DB:-nd}
+    healthcheck:
+      # /readyz also checks Postgres; the image's own HEALTHCHECK is liveness only.
+      test:
+        - CMD
+        - /nodejs/bin/node
+        - -e
+        - "fetch('http://127.0.0.1:3000/readyz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    expose: ["3000"]
+    networks: [edge, backend]
+
+  ocpp-gateway:
+    <<: *app
+    image: ${ND_IMAGE_PREFIX:-ghcr.io/sprintengine}/nd-ocpp-gateway:${ND_IMAGE_TAG:-main}
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-nd}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env}@postgres:5432/${POSTGRES_DB:-nd}
+    healthcheck:
+      test:
+        - CMD
+        - /nodejs/bin/node
+        - -e
+        - "fetch('http://127.0.0.1:9000/readyz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    expose: ["9000"]
+    networks: [edge, backend]
+
+  postgres:
+    image: postgis/postgis:17-3.7@sha256:29619efaa36ece13e4e5abf69fe03f49b4f27f64ef01fc4c3f20b4f2228f7418
+    # The image is published for amd64 only: run this stack on an x86 VM.
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nd}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-nd}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    shm_size: 256mb
+    security_opt:
+      - no-new-privileges:true
+    # Postgres needs time to checkpoint on shutdown.
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    logging: *logging
+    # Not published: reachable only from api and ocpp-gateway on the backend
+    # network. Use `docker compose exec postgres psql` for admin work.
+    networks: [backend]
+
+networks:
+  # Caddy and the apps. Caddy publishes 80 and 443 on the host.
+  edge: {}
+  # The apps and Postgres. Internal: no route to the internet from here.
+  backend:
+    internal: true
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:
