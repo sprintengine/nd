@@ -425,7 +425,33 @@ POST   /webhooks/stripe
 
 Errors are `application/problem+json` (RFC 9457) with a stable `code` and the request id. Booking and hosting need a verified phone number (403 otherwise). Hosts see and change only their own chargers; any other charger id is 404. Search and listings are rate limited per client IP, and Better Auth limits its own routes.
 
-Realtime events: `booking:update`, `session:update {status, kwh, kw, elapsed, costSoFar, lastSeenAt}`, `charger:status`. Internal admin views (chargers, sessions, OCPP message log) come later, behind their own role.
+Internal admin views (chargers, sessions, OCPP message log) come later, behind their own role.
+
+### 9.1 Realtime
+
+`GET /ws` upgrades to a WebSocket authenticated by the same Better Auth session cookie. The upgrade is refused with a problem response before any socket exists: 401 without a session, 403 when an `Origin` header is sent and is not one of `CORS_ORIGINS` (browsers always send one; native apps may not), and 429 when the user already holds 5 connections. The server pings every 30 s and drops a connection that missed the previous pong, re-checks each connection's session every 5 minutes (closing with code 4001 once it has ended), and drops a client whose unsent data passes 1 MiB rather than buffering without bound; the client reconnects and refetches.
+
+Messages are JSON text frames with a `type`. Their Zod schemas (`serverMessageSchema`, `clientMessageSchema`, `sessionStateSchema`) live in `@nd/domain` (`realtime.ts`), so the app parses exactly what the API sends.
+
+| `type`           | To                            | Body                                                                                                                                                                                                                                                  |
+| ---------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ready`          | the new connection            | `heartbeatSeconds`                                                                                                                                                                                                                                    |
+| `booking:update` | the booking's driver and host | `bookingId`, `status`, `at`. Fetch `GET /bookings/:id` for the rest                                                                                                                                                                                   |
+| `session:update` | the booking's driver and host | The live session, the same shape as `GET /bookings/:id/session`: `bookingId`, `sessionId`, `status`, `kwh`, `kw`, `elapsed` (seconds), `costSoFar` (cents), `currency`, `lastSeenAt`, `startAt`, `stoppedAt`, `stopReason`, `failure {code, message}` |
+| `charger:status` | the charger's host            | `chargerId`, `status` (onboarding, online, offline, faulted), `connectorStatus` and `errorCode` from the latest StatusNotification, `at`                                                                                                              |
+| `resync`         | everyone                      | The API's database link reconnected and events may have been missed: refetch what is on screen                                                                                                                                                        |
+| `pong`           | the sender                    | The answer to a client's `{"type": "ping"}` (browsers cannot send WebSocket pings). Clients send nothing else                                                                                                                                         |
+
+Two sources feed it: the gateway's `charger_events` (session started, meter, status, session stopped, and the charger's connection state), through the API's one `LISTEN` connection, and the API's own changes (arrival, start and stop, failed starts, and the booking routes). Each update re-reads the rows, so a message carries the current state, and nothing is read for a booking or charger no connected user may see.
+
+The live session's `status` is a session status, or `not_started` before the first start, or `scheduled` while a delayed start waits. `costSoFar` is `billedAmount` so far: the time since billing started (StartTransaction, or the plug-in of a scheduled start), rounded up to 5 minutes at the hourly price and capped at the quote. `lastSeenAt` is when the charger last reported on the session; the app shows its age, since the state is always "last known at time T".
+
+### 9.2 Session control
+
+- **Arrive** (`POST /bookings/:id/arrive`, the driver, from 15 minutes before the slot until it ends): `confirmed` becomes `arrived`. A position sent with it is compared with the charger's and the distance recorded (more than 300 m is noted, never refused). The window-end stop is scheduled.
+- **Start** (`POST /bookings/:id/start`, an arrived booking inside its slot): a `starting` session is created and `remoteStart(chargeboxId, idTag)` sent. Accepted: a job fails the start if no `StartTransaction` arrives within 120 s, and sends `TriggerMessage(StatusNotification)`. Rejected while the charger reports a transaction open: a soft `Reset`, and one retry by a job 20 s later. Rejected otherwise, offline or no answer: the session is `failed` with a reason and copy the app shows ("The charger didn't respond. Check the cable is plugged in, then try again."), and starting again retries. Starting while a start is pending or a session runs returns it unchanged.
+- **Scheduled start**: `startAt` (inside the slot) records the plug-in and has a job send the remote start at that time; billing runs from the plug-in.
+- **Stop** (`POST /bookings/:id/stop`, the driver) sends `remoteStop(chargeboxId, transactionId)`; a job does the same 5 minutes after the slot ends. The session closes when `StopTransaction` arrives. Stopping is idempotent and takes no payment; capture follows reconciliation.
 
 ## 10. Security, privacy and compliance hooks
 
