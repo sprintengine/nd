@@ -40,6 +40,7 @@ Types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci`, `chore`
 
 - Unit tests sit next to the code as `src/**/*.test.ts`. They must not need the network or a database.
 - Integration tests are `src/**/*.int.test.ts`, run by `pnpm test:integration` against `DATABASE_URL`. A package opts in by adding a `test:integration` script and a `vitest.integration.config.ts`.
+- End-to-end tests are `tests/e2e/src/**/*.e2e.test.ts`, run by `pnpm test:e2e` against the built Docker images (see tests/e2e/README.md). They use only public interfaces: the HTTP API, the realtime WebSocket and the Zappi simulator connecting to the gateway.
 - Each package sets coverage thresholds in its `vitest.config.ts`. Raise them as code lands; do not lower them to get a change through.
 - Entry points (`src/main.ts`) are excluded from coverage; keep them to wiring only.
 

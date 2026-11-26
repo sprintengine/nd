@@ -16,7 +16,7 @@ The reference deployment is one virtual machine running Docker Compose, behind C
 | `infra/.env.example`    | Every setting, documented. Copied to `infra/.env` on the VM, never committed   |
 | `infra/backup.sh`       | Nightly `pg_dump` to S3-compatible object storage (Cloudflare R2), 30-day keep |
 | `infra/restore.sh`      | Restores a dump into a scratch database, or replaces the live one              |
-| `infra/compose.e2e.yml` | Throwaway stack for CI and local smoke tests (`infra/e2e-smoke.sh`)            |
+| `infra/compose.e2e.yml` | Throwaway stack for CI: smoke test (`infra/e2e-smoke.sh`) and `pnpm test:e2e`  |
 
 The images are built by `.github/workflows/release.yml` on every push to `main` and published as `ghcr.io/<owner>/nd-api` and `ghcr.io/<owner>/nd-ocpp-gateway`, for amd64 and arm64, tagged `main` and `sha-<commit>`. Merging is not releasing: the VM runs whichever tag `ND_IMAGE_TAG` in `infra/.env` names.
 

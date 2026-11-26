@@ -4,4 +4,10 @@
   // lefthook is used through lefthook.yml and its install script, which knip
   // only sees once the git hooks are installed (never in CI).
   "ignoreDependencies": ["lefthook"],
+  "workspaces": {
+    "tests/e2e": {
+      // The Stripe double runs in its own container (stripe-double/Dockerfile).
+      "entry": ["stripe-double/server.ts"],
+    },
+  },
 }

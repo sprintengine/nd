@@ -11,6 +11,7 @@
     "typecheck": "turbo run typecheck typecheck:root",
     "test": "turbo run test",
     "test:integration": "turbo run test:integration",
+    "test:e2e": "pnpm --filter @nd/e2e test:e2e",
     "typecheck:root": "tsc",
     "db:up": "docker compose -f docker-compose.dev.yml up -d --wait",
     "db:down": "docker compose -f docker-compose.dev.yml down",

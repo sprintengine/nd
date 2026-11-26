@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+  - tests/*
 
 # Every external dependency version lives here, so all workspaces use the same one.
 catalogMode: strict

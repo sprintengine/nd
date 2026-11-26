@@ -23,6 +23,8 @@ packages/
   domain/         Booking and session rules, pricing, shared Zod contracts
   ocpp-core/      OCPP 1.6J message types, framing and validation
 infra/            Production Compose stack, Caddy config, backups, e2e smoke test
+tests/
+  e2e/            End-to-end scenarios against the Docker images, and a stateful Stripe double
 docs/             Architecture, decision records, deployment and runbook
 ```
 
@@ -53,16 +55,17 @@ To run one app on another port: `PORT=3100 pnpm --filter @nd/api dev`.
 
 ## Checks
 
-| Command                 | What it does                                                                       |
-| ----------------------- | ---------------------------------------------------------------------------------- |
-| `pnpm format:check`     | Prettier check (`pnpm format` to fix)                                              |
-| `pnpm lint`             | ESLint with type-aware typescript-eslint rules, per package and for root files     |
-| `pnpm lint:packages`    | syncpack: every package takes dependency versions from the pnpm catalog            |
-| `pnpm typecheck`        | `tsc` over every package                                                           |
-| `pnpm test`             | Unit tests with v8 coverage; each package enforces its own coverage thresholds     |
-| `pnpm test:integration` | Integration tests against Postgres at `DATABASE_URL` (defaults to the dev compose) |
-| `pnpm build`            | Compiles every package to `dist/`                                                  |
-| `pnpm knip`             | Unused files, exports and dependencies                                             |
+| Command                 | What it does                                                                                        |
+| ----------------------- | --------------------------------------------------------------------------------------------------- |
+| `pnpm format:check`     | Prettier check (`pnpm format` to fix)                                                               |
+| `pnpm lint`             | ESLint with type-aware typescript-eslint rules, per package and for root files                      |
+| `pnpm lint:packages`    | syncpack: every package takes dependency versions from the pnpm catalog                             |
+| `pnpm typecheck`        | `tsc` over every package                                                                            |
+| `pnpm test`             | Unit tests with v8 coverage; each package enforces its own coverage thresholds                      |
+| `pnpm test:integration` | Integration tests against Postgres at `DATABASE_URL` (defaults to the dev compose)                  |
+| `pnpm test:e2e`         | Builds the images, starts `infra/compose.e2e.yml` and runs the end-to-end scenarios (Docker needed) |
+| `pnpm build`            | Compiles every package to `dist/`                                                                   |
+| `pnpm knip`             | Unused files, exports and dependencies                                                              |
 
 The integration database URL is:
 
