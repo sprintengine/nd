@@ -30,6 +30,7 @@ import {
   ocppMessageDirection,
   ocppMessageType,
   paymentStatus,
+  sessionReviewReason,
   sessionStatus,
   transferHoldReason,
   transferStatus,
@@ -265,6 +266,13 @@ export const sessions = pgTable(
     stoppedAt: timestamptz("stopped_at"),
     stopReason: text("stop_reason"),
     status: sessionStatus("status").notNull().default("starting"),
+    /** Why the session waits for the host or support before it is billed. */
+    reviewReason: sessionReviewReason("review_reason"),
+    /** Closed without a StopTransaction: billed once the host confirms or this time passes. */
+    confirmationDueAt: timestamptz("confirmation_due_at"),
+    hostConfirmedAt: timestamptz("host_confirmed_at"),
+    /** When the payment was captured (or released) and the session settled. */
+    reconciledAt: timestamptz("reconciled_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

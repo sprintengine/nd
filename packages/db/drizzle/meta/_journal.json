@@ -50,6 +50,13 @@
       "when": 1795712702941,
       "tag": "0006_session_control",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795714014790,
+      "tag": "0007_settlement",
+      "breakpoints": true
     }
   ]
 }

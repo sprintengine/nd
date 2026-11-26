@@ -10,6 +10,7 @@ import {
   OCPP_MESSAGE_DIRECTIONS,
   OCPP_MESSAGE_TYPES,
   PAYMENT_STATUSES,
+  SESSION_REVIEW_REASONS,
   SESSION_STATUSES,
   TAX_ENTITY_TYPES,
   TRANSFER_HOLD_REASONS,
@@ -22,6 +23,7 @@ import { pgEnum } from "drizzle-orm/pg-core";
 
 export const bookingStatus = pgEnum("booking_status", BOOKING_STATUSES);
 export const sessionStatus = pgEnum("session_status", SESSION_STATUSES);
+export const sessionReviewReason = pgEnum("session_review_reason", SESSION_REVIEW_REASONS);
 export const chargerStatus = pgEnum("charger_status", CHARGER_STATUSES);
 export const connectorType = pgEnum("connector_type", CONNECTOR_TYPES);
 export const paymentStatus = pgEnum("payment_status", PAYMENT_STATUSES);
