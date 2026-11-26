@@ -1,0 +1,23 @@
+{
+  "name": "@nd/ocpp-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OCPP 1.6J central system that chargers (via the vendor cloud) connect to over WebSocket.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "node --conditions=@nd/source --watch src/main.ts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@nd/config": "workspace:*",
+    "@nd/ocpp-core": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}
