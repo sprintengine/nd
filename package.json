@@ -8,13 +8,19 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck typecheck:root",
+    "test": "turbo run test",
+    "test:integration": "turbo run test:integration",
+    "typecheck:root": "tsc",
+    "db:up": "docker compose -f docker-compose.dev.yml up -d --wait",
+    "db:down": "docker compose -f docker-compose.dev.yml down"
   },
   "devDependencies": {
     "@nd/config": "workspace:*",
     "@types/node": "catalog:",
     "turbo": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "packageManager": "pnpm@10.34.9",
   "engines": {

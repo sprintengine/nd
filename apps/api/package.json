@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "node --conditions=@nd/source --watch src/main.ts",
     "start": "node dist/main.js",
+    "test": "vitest run --coverage",
     "typecheck": "tsc"
   },
   "dependencies": {
@@ -17,7 +18,10 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@nd/config": "workspace:*",
     "@types/node": "catalog:",
-    "typescript": "catalog:"
+    "@vitest/coverage-v8": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

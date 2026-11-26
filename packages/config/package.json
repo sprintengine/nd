@@ -11,17 +11,21 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./tsconfig/*.json": "./tsconfig/*.json"
+    "./tsconfig/*.json": "./tsconfig/*.json",
+    "./vitest": "./vitest.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "test": "vitest run --coverage"
   },
   "dependencies": {
     "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "typescript": "catalog:"
+    "@vitest/coverage-v8": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

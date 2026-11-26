@@ -29,6 +29,29 @@
     "dev": {
       "cache": false,
       "persistent": true
+    },
+    "test": {
+      "dependsOn": [
+        "transit"
+      ],
+      "outputs": [
+        "coverage/**"
+      ]
+    },
+    "test:integration": {
+      "dependsOn": [
+        "transit"
+      ],
+      "cache": false,
+      "env": [
+        "DATABASE_URL"
+      ]
+    },
+    "//#typecheck:root": {
+      "inputs": [
+        "*.ts",
+        "tsconfig.json"
+      ]
     }
   }
 }

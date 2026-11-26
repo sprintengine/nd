@@ -14,11 +14,14 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run --coverage",
     "typecheck": "tsc"
   },
   "devDependencies": {
     "@nd/config": "workspace:*",
     "@types/node": "catalog:",
-    "typescript": "catalog:"
+    "@vitest/coverage-v8": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }
