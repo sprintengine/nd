@@ -1,5 +1,8 @@
+import { fileURLToPath } from "node:url";
+
 import type * as DbModule from "@nd/db";
 import type { FastifyInstance } from "fastify";
+import { format, resolveConfig } from "prettier";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { fakeChargerEvents } from "../test/fakes.ts";
@@ -141,9 +144,14 @@ describe("OpenAPI", () => {
       "/me/payment-methods/setup-intent",
       "/webhooks/stripe",
     ]);
-    await expect(`${JSON.stringify(spec, null, 2)}\n`).toMatchFileSnapshot(
-      "__snapshots__/openapi.json",
-    );
+    // Written in the repository's Prettier style, so formatting the file (from
+    // any directory, or in an editor) never changes it and `format:check` covers it.
+    const file = fileURLToPath(new URL("__snapshots__/openapi.json", import.meta.url));
+    const contract = await format(JSON.stringify(spec, null, 2), {
+      ...(await resolveConfig(file)),
+      filepath: file,
+    });
+    await expect(contract).toMatchFileSnapshot(file);
   });
 });
 

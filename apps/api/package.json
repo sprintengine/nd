@@ -44,6 +44,7 @@
     "eslint": "catalog:",
     "openapi-types": "catalog:",
     "pino": "catalog:",
+    "prettier": "catalog:",
     "typescript": "catalog:",
     "undici": "catalog:",
     "vitest": "catalog:",

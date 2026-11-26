@@ -5,4 +5,3 @@ coverage/
 .turbo/
 .cache/
 packages/db/drizzle/meta/
-apps/api/src/__snapshots__/

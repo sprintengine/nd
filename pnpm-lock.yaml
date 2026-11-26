@@ -251,6 +251,9 @@ importers:
       pino:
         specifier: 'catalog:'
         version: 10.4.0
+      prettier:
+        specifier: 'catalog:'
+        version: 3.10.1
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
