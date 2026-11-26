@@ -111,13 +111,23 @@ describe("OpenAPI", () => {
     const spec = response.json<{ openapi: string; paths: Record<string, unknown> }>();
     expect(spec.openapi).toBe("3.1.0");
     expect(Object.keys(spec.paths).sort()).toEqual([
+      "/bookings",
+      "/bookings/{id}",
+      "/bookings/{id}/approve",
+      "/bookings/{id}/cancel",
+      "/bookings/{id}/decline",
       "/chargers",
       "/chargers/{id}",
       "/hosts",
+      "/hosts/bookings",
       "/hosts/chargers",
       "/hosts/chargers/{id}",
       "/hosts/chargers/{id}/onboarding",
       "/me",
+      "/me/payment-methods",
+      "/me/payment-methods/default",
+      "/me/payment-methods/setup-intent",
+      "/webhooks/stripe",
     ]);
     await expect(`${JSON.stringify(spec, null, 2)}\n`).toMatchFileSnapshot(
       "__snapshots__/openapi.json",

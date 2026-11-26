@@ -73,6 +73,10 @@ export const apiEnvSchema = z
     SMS_PROVIDER: z.enum(["console"]).default("console"),
     /** Stripe secret key; without it, becoming a host answers 503. */
     STRIPE_SECRET_KEY: optionalSecret,
+    /** Signing secret of the Stripe webhook endpoint; without it POST /webhooks/stripe answers 503. */
+    STRIPE_WEBHOOK_SECRET: optionalSecret,
+    /** The platform's fee on each capture, in basis points (100 = 1 %). Default 0. */
+    PLATFORM_FEE_BPS: z.coerce.number().int().min(0).max(10_000).default(0),
     /** Alternative Stripe API base URL, e.g. stripe-mock in end-to-end tests. */
     STRIPE_API_BASE_URL: optional(z.url({ protocol: /^https?$/ })),
     /** OCPP URL hosts paste into their charger account. Must end in `/`. */
@@ -146,6 +150,10 @@ export interface ApiConfig {
   readonly google: { readonly clientId: string; readonly clientSecret: string } | undefined;
   readonly ocppWssUrl: string;
   readonly onboardingWaitMaxSeconds: number;
+  /** Verifies Stripe webhook signatures; unset turns the webhook endpoint off (503). */
+  readonly stripeWebhookSecret: string | undefined;
+  /** Platform fee in basis points, kept back from each transfer to the host. */
+  readonly platformFeeBps: number;
 }
 
 /** Turns the parsed environment into application settings. */
@@ -175,5 +183,7 @@ export function configFromEnv(env: ApiEnv): ApiConfig {
         : undefined,
     ocppWssUrl: env.OCPP_WSS_URL,
     onboardingWaitMaxSeconds: env.ONBOARDING_WAIT_MAX_SECONDS,
+    stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
+    platformFeeBps: env.PLATFORM_FEE_BPS,
   };
 }

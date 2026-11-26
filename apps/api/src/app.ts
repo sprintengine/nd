@@ -13,11 +13,16 @@ import {
 import { type Auth, createAuth } from "./auth/auth.ts";
 import { registerAuthRoutes } from "./auth/routes.ts";
 import { registerSession } from "./auth/session.ts";
+import { BOOKING_JOBS } from "./bookings/jobs.ts";
 import type { AppDeps } from "./deps.ts";
 import { HttpProblem, registerProblemHandlers } from "./http/problem.ts";
+import { registerBookingRoutes } from "./routes/bookings.ts";
 import { registerChargerRoutes } from "./routes/chargers.ts";
 import { registerHostRoutes } from "./routes/hosts.ts";
 import { registerMeRoutes } from "./routes/me.ts";
+import { registerPaymentMethodRoutes } from "./routes/payment-methods.ts";
+import { registerStripeWebhook } from "./routes/webhooks.ts";
+import type { Services } from "./services.ts";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -121,6 +126,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   app.decorate("auth", auth);
 
+  const services: Services = {
+    db: deps.database.db,
+    clock: deps.clock,
+    payments: deps.payments,
+    jobs: deps.jobs,
+    platformFeeBps: config.platformFeeBps,
+    log: app.log,
+  };
+
   void app.register((scope, _options, done) => {
     registerAuthRoutes(scope, auth, config.publicApiUrl);
     registerSession(scope, auth);
@@ -129,10 +143,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerMeRoutes(scope, deps);
     registerChargerRoutes(scope, deps);
     registerHostRoutes(scope, deps);
+    registerBookingRoutes(scope, services);
+    registerPaymentMethodRoutes(scope, services);
+    registerStripeWebhook(scope, services, config.stripeWebhookSecret);
     done();
   });
 
+  // Jobs run in this process: they start once the app is ready and stop,
+  // letting running jobs finish, when it closes.
+  app.addHook("onReady", async () => {
+    await deps.jobs.start(BOOKING_JOBS, services, app.log);
+  });
   app.addHook("onClose", async () => {
+    await deps.jobs.stop();
     await deps.chargerEvents.close();
   });
   return app;

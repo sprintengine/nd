@@ -17,6 +17,8 @@ export function testConfig(overrides: Partial<ApiConfig> = {}): ApiConfig {
     google: undefined,
     ocppWssUrl: "wss://ocpp.example.com/v16/",
     onboardingWaitMaxSeconds: 5,
+    stripeWebhookSecret: "whsec_test_secret",
+    platformFeeBps: 0,
     ...overrides,
   };
 }

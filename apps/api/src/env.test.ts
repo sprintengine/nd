@@ -133,4 +133,20 @@ describe("configFromEnv", () => {
     expect(config.google).toEqual({ clientId: "google-id", clientSecret: "google-secret" });
     expect(config.secureCookies).toBe(false);
   });
+
+  it("reads the webhook secret and the platform fee, which defaults to nothing", () => {
+    expect(configFromEnv(apiEnvSchema.parse(required))).toMatchObject({
+      stripeWebhookSecret: undefined,
+      platformFeeBps: 0,
+    });
+    const config = configFromEnv(
+      apiEnvSchema.parse({
+        ...required,
+        STRIPE_WEBHOOK_SECRET: "whsec_example",
+        PLATFORM_FEE_BPS: "250",
+      }),
+    );
+    expect(config).toMatchObject({ stripeWebhookSecret: "whsec_example", platformFeeBps: 250 });
+    expect(apiEnvSchema.safeParse({ ...required, PLATFORM_FEE_BPS: "10001" }).success).toBe(false);
+  });
 });

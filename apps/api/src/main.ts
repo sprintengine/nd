@@ -5,15 +5,21 @@ import { createChargerControlClient } from "@nd/domain";
 import { randomIds, systemClock } from "./deps.ts";
 import { createPgChargerEvents } from "./events/charger-events.ts";
 import { apiEnvSchema, buildApp, configFromEnv, loggerOptions } from "./index.ts";
+import { createPgBossRunner } from "./jobs/pg-boss.ts";
 import { createDatabaseProbe, registerReadiness } from "./readiness.ts";
 import { consoleEmailSender, consoleSmsSender } from "./senders/senders.ts";
 import { closeOnSignal } from "./shutdown.ts";
-import { createStripeConnect, unconfiguredStripeConnect } from "./stripe/stripe.ts";
+import { stripePaymentsFrom, unconfiguredStripePayments } from "./stripe/payments.ts";
+import { createStripeSdk, stripeConnectFrom, unconfiguredStripeConnect } from "./stripe/stripe.ts";
 
 const env = parseEnv(apiEnvSchema);
 const config = configFromEnv(env);
 const database = createDb(env.DATABASE_URL);
 const probe = createDatabaseProbe(env.DATABASE_URL);
+const stripeSdk =
+  env.STRIPE_SECRET_KEY === undefined
+    ? undefined
+    : createStripeSdk(env.STRIPE_SECRET_KEY, env.STRIPE_API_BASE_URL);
 
 // Real email and SMS providers plug in here. Until then, production writes
 // only that a message was dropped, never a link or code.
@@ -24,10 +30,10 @@ const app = buildApp({
   ids: randomIds,
   email: consoleEmailSender({ redact: config.production }),
   sms: consoleSmsSender({ redact: config.production }),
-  stripe:
-    env.STRIPE_SECRET_KEY === undefined
-      ? unconfiguredStripeConnect
-      : createStripeConnect(env.STRIPE_SECRET_KEY, env.STRIPE_API_BASE_URL),
+  stripe: stripeSdk === undefined ? unconfiguredStripeConnect : stripeConnectFrom(stripeSdk),
+  payments: stripeSdk === undefined ? unconfiguredStripePayments : stripePaymentsFrom(stripeSdk),
+  // pg-boss in its own schema of the same database; started and stopped with the app.
+  jobs: createPgBossRunner({ connectionString: env.DATABASE_URL }),
   chargerControl: createChargerControlClient({
     baseUrl: env.GATEWAY_INTERNAL_URL,
     secret: env.GATEWAY_INTERNAL_SECRET,

@@ -4,7 +4,9 @@ import type { FastifyServerOptions } from "fastify";
 
 import type { ApiConfig } from "./env.ts";
 import type { ChargerEvents } from "./events/charger-events.ts";
+import type { JobRunner } from "./jobs/jobs.ts";
 import type { EmailSender, SmsSender } from "./senders/senders.ts";
+import type { StripePayments } from "./stripe/payments.ts";
 import type { StripeConnect } from "./stripe/stripe.ts";
 
 /** The current time. Tests pass a fixed clock. */
@@ -26,6 +28,10 @@ export interface AppDeps {
   readonly email: EmailSender;
   readonly sms: SmsSender;
   readonly stripe: StripeConnect;
+  /** Driver payments: customers, cards, authorisations, captures and host transfers. */
+  readonly payments: StripePayments;
+  /** Background jobs (pg-boss in production); started when the app is ready, stopped on close. */
+  readonly jobs: JobRunner;
   readonly chargerControl: ChargerControl;
   readonly chargerEvents: ChargerEvents;
   /** Fastify logger settings; `false` (the default) keeps tests quiet. */

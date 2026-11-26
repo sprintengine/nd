@@ -1,6 +1,6 @@
 # @nd/api
 
-The HTTP API: accounts (Better Auth), charger search and listings, and host onboarding. Fastify 5 with Zod schemas for every request and response; the OpenAPI 3.1 document is generated from them and served at `/openapi.json`.
+The HTTP API: accounts (Better Auth), charger search and listings, host onboarding, bookings and payments, and the background jobs behind them. Fastify 5 with Zod schemas for every request and response; the OpenAPI 3.1 document is generated from them and served at `/openapi.json`.
 
 ## Running locally
 
@@ -45,7 +45,9 @@ Every variable is validated at start-up (`src/env.ts`); a bad value stops the pr
 | `APPLE_CLIENT_ID`, `APPLE_CLIENT_SECRET`   | unset                      | Sign in with Apple; both or neither. `APPLE_APP_BUNDLE_ID` for native ID tokens             |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | unset                      | Sign in with Google; both or neither                                                        |
 | `EMAIL_PROVIDER`, `SMS_PROVIDER`           | `console`                  | Only the console senders exist so far                                                       |
-| `STRIPE_SECRET_KEY`                        | unset                      | Stripe Connect for host payouts; without it `POST /hosts` answers 503                       |
+| `STRIPE_SECRET_KEY`                        | unset                      | Stripe for host payouts and driver payments; without it those routes answer 503             |
+| `STRIPE_WEBHOOK_SECRET`                    | unset                      | Verifies `POST /webhooks/stripe`; without it the endpoint answers 503                       |
+| `PLATFORM_FEE_BPS`                         | `0`                        | Platform fee kept back from each host transfer, in basis points (100 = 1 %)                 |
 | `STRIPE_API_BASE_URL`                      | Stripe                     | Another Stripe API, e.g. stripe-mock in end-to-end tests                                    |
 | `OCPP_WSS_URL`                             | `ws://localhost:9000/v16/` | The OCPP URL hosts enter in their charger account; must end in `/`                          |
 | `GATEWAY_INTERNAL_URL`                     | `http://localhost:9100`    | The gateway's internal ChargerControl endpoint                                              |
@@ -58,14 +60,48 @@ Every variable is validated at start-up (`src/env.ts`); a bad value stops the pr
 - **Auth** (`src/auth/`): Better Auth at `/auth/*` on the Drizzle adapter, with its `user` model mapped onto `users` and its sessions, accounts and verifications in the `auth_*` tables. Magic links last 15 minutes and work once; phone codes verify the signed-in user's number and never sign anyone in. Sessions are httpOnly cookies for 30 days, renewed daily while used, and revocable through Better Auth's sign-out and session routes. One `onRequest` hook resolves the session; `requireUser` and `requireVerifiedPhone` guard routes.
 - **Search and listings** (`src/routes/chargers.ts`): search uses `searchChargers` from `@nd/db`, which never returns exact positions. A listing shows free slots for the next 7 days, from availability rules in the charger's time zone minus bookings that hold the charger. The address and exact position are shown only to a driver with a confirmed, arrived or active booking there.
 - **Host onboarding** (`src/routes/hosts.ts`): only the Zappi v2.1 (serial starting with 2) and GLO can connect. The OCPP password is 20 random characters, returned once and stored as an argon2id PHC string by `hashChargerSecret` from `@nd/db`, the helper the gateway verifies it with. The onboarding long-poll subscribes to `LISTEN charger_events`, then re-reads the charger on every event (parsed with the versioned `@nd/domain` contract; anything else is skipped) and after a reconnect, because NOTIFY is not durable.
+- **Bookings** (`src/routes/bookings.ts`, rules in `src/bookings/`): `POST /bookings` checks the charger is online and listed, the slot lies inside one availability window in the charger's time zone and under the host's daily cap, and refuses an overlap with 409 before calling Stripe. The quote comes from `quote()` in `@nd/domain` (the slot's minutes at the hourly price, no fee). Instant book confirms at once with a 20-character idTag; otherwise the host approves (`/approve`, idTag issued then) or declines (`/decline`, authorisation released). `/cancel` applies the host's cutoff (default 2 hours): free before it, one hour at the hourly price (capped at the quote) after it, never once the driver has arrived. The driver sees the address only while the booking holds the slot.
+- **Payments** (`src/stripe/payments.ts`, `src/payments/`): separate charges and transfers. Each driver gets a Stripe Customer the first time they save a card (`POST /me/payment-methods/setup-intent`); the app confirms the SetupIntent with Stripe's SDK, so card details never reach the API. A slot starting within 6 days is authorised at booking with an off-session, manual-capture PaymentIntent on the platform account (`transfer_group` = booking id); a later one keeps the saved card (`card_saved`) and is authorised by a job 24 hours ahead. `captureForBooking(bookingId, amount)` captures at most the authorised amount; `createHostTransfer(paymentId)` sends the capture less the platform fee to the host's connected account with `source_transaction`, or records it as held while the session needs review, a dispute is open, the host's tax details are incomplete or payouts are not enabled. Every Stripe write has an idempotency key derived from the booking (`booking-<id>-authorise`, `-release`, `-capture`, `-transfer`). Stripe errors reach clients only as a 502 `payment-provider-error`.
+- **Webhooks** (`src/routes/webhooks.ts`): `POST /webhooks/stripe` verifies the signature against the raw body, records the event id in `stripe_webhook_events` in the same transaction as its effects (a redelivery answers `duplicate`), and handles `payment_intent.amount_capturable_updated`, `.succeeded`, `.canceled` and `.payment_failed`, `setup_intent.succeeded` (the first card becomes the default) and `account.updated` (mirrored into `hosts.payout_status`, which unblocks publishing). Only event ids and types are logged.
 - Data access lives in `src/data/`; unit tests mock it, integration tests run it against Postgres.
 - Errors are `application/problem+json` (`src/http/problem.ts`), including Better Auth's, which keep its `code` and `message`.
+
+## Jobs
+
+Background jobs run inside the API process on [pg-boss](https://github.com/timgit/pg-boss), in its own `pgboss` schema of the same database: no Redis and no separate worker. `buildApp` starts them when the app is ready (installing or migrating the schema) and stops them when it closes, letting running jobs finish for up to 8 seconds.
+
+A job is a typed definition (`src/jobs/jobs.ts`):
+
+```ts
+export const noShowJob = defineJob({
+  name: "booking-no-show", // the queue
+  payload: z.object({ bookingId: z.uuid() }), // validated on send and on run
+  retry: { limit: 5, delaySeconds: 60, backoff: true, maxDelaySeconds: 3600 },
+  run: ({ bookingId }, services: Services, attempt) => markNoShow(services, bookingId),
+});
+
+await services.jobs.send(noShowJob, { bookingId }, { startAfter, singletonKey: bookingId });
+```
+
+- Add the definition to the list `buildApp` starts (`BOOKING_JOBS` in `src/bookings/jobs.ts`, or a list of your own next to it).
+- Each queue uses pg-boss's `stately` policy: while a job with a singleton key is queued, retrying or running, sending another with the same key does nothing. Use the id the job is about as the key. A job sent without a key gets a random one.
+- A handler throws to fail an attempt; it is retried with exponential backoff until `retry.limit`, and `attempt.lastAttempt` tells it when no retry follows. Handlers must be safe to run twice: check the row's state before acting.
+- A payload that fails validation is logged and dropped, never retried.
+- Tests: `runner.runNow(job, payload)` runs a handler at once as its last attempt; `runner.drain()` works every ready job, including ones they queue. Unit tests use the in-memory runner in `test/fakes.ts`.
+
+| Job                      | When                    | What                                                                                       |
+| ------------------------ | ----------------------- | ------------------------------------------------------------------------------------------ |
+| `authorise-booking`      | 24 h before the slot    | Authorises the saved card; retries a decline, then cancels the booking at no charge        |
+| `booking-expire-request` | slot start              | Cancels a request the host never answered and releases the authorisation                   |
+| `booking-no-show`        | slot end + 15 min       | A confirmed booking never arrived at becomes `no_show` and pays one hour (capped at quote) |
+| `host-transfer`          | after a fee is captured | Sends or holds the host's transfer                                                         |
 
 ## Tests
 
 ```sh
 pnpm --filter @nd/api test                 # unit tests with coverage; no database
+docker run -d --name stripe-mock -p 127.0.0.1:12111:12111 stripe/stripe-mock:v0.206.0
 DATABASE_URL=postgres://nd:nd@localhost:54320/nd pnpm --filter @nd/api test:integration
 ```
 
-Integration tests create and drop their own database per file. `src/__snapshots__/openapi.json` is the committed API contract: a change to a route's schema fails the unit tests until the snapshot is updated (`pnpm --filter @nd/api exec vitest run -u`), so contract changes show up in review.
+Integration tests create and drop their own database per file. Payments run against [stripe-mock](https://github.com/stripe/stripe-mock) at `STRIPE_API_BASE_URL` (default `http://localhost:12111`), which checks every request against Stripe's API but keeps no state; `test/stripe-mock.ts` applies Stripe's documented state changes on top (an off-session manual-capture confirm leaves the intent `requires_capture`, capture makes it `succeeded`) and can decline the next authorisation. `src/__snapshots__/openapi.json` is the committed API contract: a change to a route's schema fails the unit tests until the snapshot is updated (`pnpm --filter @nd/api exec vitest run -u`), so contract changes show up in review.
