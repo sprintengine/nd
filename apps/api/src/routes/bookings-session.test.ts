@@ -79,6 +79,21 @@ describe("session routes", () => {
     expect((await send("POST", `/bookings/${BOOKING_ID}/arrive`, {})).statusCode).toBe(404);
   });
 
+  it("gives session control the configured durations", async () => {
+    await app.close();
+    ({ app } = startUnitApp({
+      sessionStartTimeoutSeconds: 7,
+      staleSessionGraceMinutes: 2,
+      minBookingMinutes: 3,
+    }));
+    signInAs(app);
+    expect((await send("POST", `/bookings/${BOOKING_ID}/start`, {})).statusCode).toBe(200);
+    expect(vi.mocked(control.startCharging).mock.calls.at(-1)?.[0]).toMatchObject({
+      sessionTimings: { startTimeoutSeconds: 7, resetRetryDelaySeconds: 20 },
+      timings: { staleSessionGraceMinutes: 2, minBookingMinutes: 3 },
+    });
+  });
+
   it("starts, now or later, and stops, answering with the session", async () => {
     const started = await send("POST", `/bookings/${BOOKING_ID}/start`, {});
     expect(started.statusCode).toBe(200);

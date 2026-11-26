@@ -4,6 +4,7 @@ import type { Clock } from "./deps.ts";
 import type { JobLogger, JobQueue } from "./jobs/jobs.ts";
 import type { EmailSender } from "./senders/senders.ts";
 import type { StripePayments } from "./stripe/payments.ts";
+import type { Timings } from "./timings.ts";
 
 /** What booking and payment logic needs, for route handlers and jobs alike. */
 export interface Services {
@@ -14,6 +15,8 @@ export interface Services {
   /** Platform fee in basis points, kept back from each transfer to the host. */
   readonly platformFeeBps: number;
   readonly log: JobLogger;
+  /** Booking and settlement durations; production keeps the defaults. */
+  readonly timings: Timings;
   /** Notices to drivers and hosts (session closed without a stop, payout summaries). */
   readonly email: EmailSender;
 }

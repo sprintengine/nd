@@ -16,6 +16,7 @@ import {
 import { captureForBooking, createHostTransfer } from "../payments/settlement.ts";
 import type { Services } from "../services.ts";
 import { stripePaymentsFrom } from "../stripe/payments.ts";
+import { DEFAULT_TIMINGS } from "../timings.ts";
 
 const HOUR = 3_600_000;
 const WEBHOOK_SECRET = "whsec_test_secret";
@@ -195,6 +196,7 @@ beforeAll(async () => {
     payments: stripePaymentsFrom(h.stripeMock.sdk),
     jobs: h.jobs,
     platformFeeBps: 0,
+    timings: DEFAULT_TIMINGS,
     log: { info: () => undefined, warn: () => undefined, error: () => undefined },
     email: h.mail.email,
   };

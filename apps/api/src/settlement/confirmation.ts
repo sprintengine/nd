@@ -43,7 +43,7 @@ export async function closeStaleSession(
     found === undefined ||
     found.session.status === "starting" ||
     !isOpenSession(found.session.status) ||
-    now < staleSessionCloseAt(found.booking.slot.end)
+    now < staleSessionCloseAt(found.booking.slot.end, services.timings.staleSessionGraceMinutes)
   ) {
     return "skipped";
   }

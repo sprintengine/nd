@@ -159,6 +159,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     payments: deps.payments,
     jobs: deps.jobs,
     platformFeeBps: config.platformFeeBps,
+    timings: {
+      minBookingMinutes: config.minBookingMinutes,
+      staleSessionGraceMinutes: config.staleSessionGraceMinutes,
+    },
     log: app.log,
     email: deps.email,
   };
@@ -170,7 +174,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const sessionServices: SessionServices = {
     ...services,
     chargerControl: deps.chargerControl,
-    sessionTimings: { ...DEFAULT_SESSION_TIMINGS, ...deps.sessionTimings },
+    sessionTimings: {
+      ...DEFAULT_SESSION_TIMINGS,
+      startTimeoutSeconds: config.sessionStartTimeoutSeconds,
+      ...deps.sessionTimings,
+    },
     realtime: feed,
   };
   // Background jobs get everything above plus push notifications.

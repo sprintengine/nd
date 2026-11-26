@@ -1,6 +1,8 @@
 import { port } from "@nd/config";
+import { STALE_SESSION_GRACE_MINUTES, START_TIMEOUT_SECONDS } from "@nd/domain";
 import { z } from "zod";
 
+import { MIN_BOOKING_MINUTES } from "./bookings/rules.ts";
 import type { FcmServiceAccount } from "./push/fcm.ts";
 import { parseTaxKeyring, type TaxKeyring } from "./tax/crypto.ts";
 
@@ -208,6 +210,28 @@ export const apiEnvSchema = z
       ),
     /** Longest the onboarding long-poll waits for the charger to connect, in seconds. */
     ONBOARDING_WAIT_MAX_SECONDS: z.coerce.number().int().min(1).max(120).default(25),
+    // Durations end-to-end test stacks shorten; production keeps the defaults.
+    /** A remote start with no StartTransaction after this many seconds has failed. */
+    SESSION_START_TIMEOUT_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(5)
+      .max(600)
+      .default(START_TIMEOUT_SECONDS),
+    /** Minutes after its slot that a session with no StopTransaction is closed. */
+    STALE_SESSION_GRACE_MINUTES: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(24 * 60)
+      .default(STALE_SESSION_GRACE_MINUTES),
+    /** Shortest booking a driver may make, in minutes. */
+    MIN_BOOKING_MINUTES: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(24 * 60)
+      .default(MIN_BOOKING_MINUTES),
   })
   .superRefine((env, context) => {
     const pairs = [
@@ -362,6 +386,12 @@ export interface ApiConfig {
   readonly taxKeys: TaxKeyring | undefined;
   /** Users allowed to use the /admin routes. */
   readonly adminUserIds: readonly string[];
+  /** Seconds a remote start may take before it has failed. */
+  readonly sessionStartTimeoutSeconds: number;
+  /** Minutes after its slot that a session with no StopTransaction is closed. */
+  readonly staleSessionGraceMinutes: number;
+  /** Shortest booking, in minutes. */
+  readonly minBookingMinutes: number;
 }
 
 /** Turns the parsed environment into application settings. */
@@ -395,5 +425,8 @@ export function configFromEnv(env: ApiEnv): ApiConfig {
     platformFeeBps: env.PLATFORM_FEE_BPS,
     taxKeys: env.TAX_ENCRYPTION_KEYS,
     adminUserIds: env.ADMIN_USER_IDS,
+    sessionStartTimeoutSeconds: env.SESSION_START_TIMEOUT_SECONDS,
+    staleSessionGraceMinutes: env.STALE_SESSION_GRACE_MINUTES,
+    minBookingMinutes: env.MIN_BOOKING_MINUTES,
   };
 }

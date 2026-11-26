@@ -1,6 +1,7 @@
 import type { Executor } from "@nd/db";
 
 import type { Services } from "../src/services.ts";
+import { DEFAULT_TIMINGS } from "../src/timings.ts";
 import { fakePayments, memoryJobs, outbox } from "./fakes.ts";
 
 /** Services over a database that is never touched (tests mock the data modules) and fakes. */
@@ -19,6 +20,7 @@ export function unitServices(now: Date, overrides: Partial<Services> = {}) {
     payments: payments.payments,
     jobs: jobs.runner,
     platformFeeBps: 0,
+    timings: DEFAULT_TIMINGS,
     log,
     email: mail.email,
     ...overrides,

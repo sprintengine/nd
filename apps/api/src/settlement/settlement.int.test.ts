@@ -20,6 +20,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type Harness, startHarness } from "../../test/harness.ts";
 import { APP_ORIGIN } from "../../test/http.ts";
 import { stripePaymentsFrom } from "../stripe/payments.ts";
+import { DEFAULT_TIMINGS } from "../timings.ts";
 import {
   confirmationTimeoutJob,
   reconcileSessionJob,
@@ -261,6 +262,7 @@ beforeAll(async () => {
     payments: stripePaymentsFrom(h.stripeMock.sdk),
     jobs: h.jobs,
     platformFeeBps: 0,
+    timings: DEFAULT_TIMINGS,
     log: { info: () => undefined, warn: () => undefined, error: () => undefined },
     email: h.mail.email,
     realtime: { bookingChanged: () => undefined, sessionChanged: () => undefined },

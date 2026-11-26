@@ -1,5 +1,3 @@
-import { STALE_SESSION_GRACE_MINUTES } from "@nd/domain";
-
 import { hostTransferJob } from "../bookings/jobs.ts";
 import {
   arrivedWithoutSession,
@@ -38,7 +36,7 @@ export interface SweepResult {
 export async function settlementSweep(services: Services): Promise<SweepResult> {
   const { db, jobs } = services;
   const now = services.clock.now();
-  const cutoff = new Date(now.getTime() - STALE_SESSION_GRACE_MINUTES * 60_000);
+  const cutoff = new Date(now.getTime() - services.timings.staleSessionGraceMinutes * 60_000);
 
   const toReconcile = await sessionsToReconcile(db, now, SWEEP_BATCH);
   for (const sessionId of toReconcile) {

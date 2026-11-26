@@ -103,6 +103,12 @@ describe("windowProblem", () => {
     expect(windowProblem(window("2027-01-12T22:00Z", "2027-01-13T22:00Z"), now)).toBeUndefined();
   });
 
+  it("takes a configured shortest booking", () => {
+    const short = window("2027-01-12T22:00Z", "2027-01-12T22:02Z");
+    expect(windowProblem(short, now, 2)).toBeUndefined();
+    expect(windowProblem(short, now, 3)).toMatch(/at least 3 minutes/);
+  });
+
   it.each([
     [window("2027-01-12T22:00:30Z", "2027-01-12T23:00Z"), /whole minute/],
     [window("2027-01-11T12:00Z", "2027-01-11T13:00Z"), /future/],

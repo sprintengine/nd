@@ -67,6 +67,9 @@ Every variable is validated at start-up (`src/env.ts`); a bad value stops the pr
 | `GATEWAY_INTERNAL_SECRET`                     | required                   | Bearer secret shared with the gateway; at least 32 characters                                                                                                        |
 | `ONBOARDING_WAIT_MAX_SECONDS`                 | `25`                       | Longest the onboarding long-poll waits                                                                                                                               |
 | `ADMIN_USER_IDS`                              | none                       | Comma-separated user ids allowed to use `/admin` routes (support staff)                                                                                              |
+| `SESSION_START_TIMEOUT_SECONDS`               | `120`                      | A remote start with no StartTransaction after this long has failed. Test stacks shorten it                                                                           |
+| `STALE_SESSION_GRACE_MINUTES`                 | `10`                       | Minutes after its slot that a session with no StopTransaction is closed (and an arrival with no session settled). Test stacks shorten it                             |
+| `MIN_BOOKING_MINUTES`                         | `30`                       | Shortest booking. Test stacks shorten it so a whole slot fits in a test run                                                                                          |
 
 ## How it fits together
 

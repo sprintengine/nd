@@ -199,6 +199,43 @@ describe("message providers", () => {
   });
 });
 
+describe("durations", () => {
+  it("default to the production values and may be shortened", () => {
+    expect(configFromEnv(apiEnvSchema.parse(required))).toMatchObject({
+      sessionStartTimeoutSeconds: 120,
+      staleSessionGraceMinutes: 10,
+      minBookingMinutes: 30,
+    });
+    expect(
+      configFromEnv(
+        apiEnvSchema.parse({
+          ...required,
+          SESSION_START_TIMEOUT_SECONDS: "10",
+          STALE_SESSION_GRACE_MINUTES: "1",
+          MIN_BOOKING_MINUTES: "2",
+        }),
+      ),
+    ).toMatchObject({
+      sessionStartTimeoutSeconds: 10,
+      staleSessionGraceMinutes: 1,
+      minBookingMinutes: 2,
+    });
+  });
+
+  it("refuse values out of range", () => {
+    expect(() =>
+      parseEnv(apiEnvSchema, {
+        ...required,
+        SESSION_START_TIMEOUT_SECONDS: "1",
+        STALE_SESSION_GRACE_MINUTES: "0",
+        MIN_BOOKING_MINUTES: "0",
+      }),
+    ).toThrow(
+      /SESSION_START_TIMEOUT_SECONDS[\s\S]*STALE_SESSION_GRACE_MINUTES[\s\S]*MIN_BOOKING_MINUTES/,
+    );
+  });
+});
+
 describe("E2E_TEST_HOOKS", () => {
   it("is off by default and allows the capture senders when on, outside production", () => {
     expect(apiEnvSchema.parse(required).E2E_TEST_HOOKS).toBe("false");

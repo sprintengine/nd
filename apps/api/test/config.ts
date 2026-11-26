@@ -25,6 +25,9 @@ export function testConfig(overrides: Partial<ApiConfig> = {}): ApiConfig {
     platformFeeBps: 0,
     taxKeys: parseTaxKeyring(TEST_TAX_KEYS),
     adminUserIds: [],
+    sessionStartTimeoutSeconds: 120,
+    staleSessionGraceMinutes: 10,
+    minBookingMinutes: 30,
     ...overrides,
   };
 }

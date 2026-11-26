@@ -25,7 +25,8 @@ export async function closeArrivedBooking(
   const detail = await findBookingDetail(services.db, bookingId);
   if (detail?.booking.status !== "arrived") return "skipped";
   const { booking, payment } = detail;
-  if (services.clock.now() < staleSessionCloseAt(booking.slot.end)) return "skipped";
+  const closeAt = staleSessionCloseAt(booking.slot.end, services.timings.staleSessionGraceMinutes);
+  if (services.clock.now() < closeAt) return "skipped";
   // A session that started is settled by reconciliation, not here.
   if ((await billedSessionOf(services.db, bookingId)) !== undefined) return "skipped";
 

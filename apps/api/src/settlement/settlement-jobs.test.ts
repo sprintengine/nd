@@ -73,6 +73,30 @@ describe("settlementSweep", () => {
   });
 });
 
+describe("settlementSweep with a shorter grace", () => {
+  it("closes stale sessions after the configured minutes", async () => {
+    const short = settlementServices(NOW, {
+      timings: { minBookingMinutes: 30, staleSessionGraceMinutes: 1 },
+    });
+    for (const query of [
+      data.sessionsToReconcile,
+      data.staleOpenSessions,
+      data.arrivedWithoutSession,
+      data.capturedWithoutTransfer,
+    ]) {
+      vi.mocked(query).mockResolvedValue([]);
+    }
+    vi.mocked(data.releasableHeldTransfers).mockResolvedValue([]);
+    await settlementSweep(short.services);
+    expect(vi.mocked(data.staleOpenSessions).mock.calls[0]?.[1]).toEqual(
+      new Date(NOW.getTime() - 60_000),
+    );
+    expect(vi.mocked(data.arrivedWithoutSession).mock.calls[0]?.[1]).toEqual(
+      new Date(NOW.getTime() - 60_000),
+    );
+  });
+});
+
 describe("releaseHeldTransfers", () => {
   it("retries each held transfer whose hold cleared and counts what went out", async () => {
     vi.mocked(data.releasableHeldTransfers).mockResolvedValue([

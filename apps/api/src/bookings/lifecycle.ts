@@ -155,7 +155,7 @@ export async function createBooking(services: Services, request: BookingRequest)
       "This charger is not taking bookings right now",
     );
   }
-  const shape = windowProblem(window, now);
+  const shape = windowProblem(window, now, services.timings.minBookingMinutes);
   if (shape !== undefined) {
     throw new HttpProblem(422, "invalid-slot", "This slot cannot be booked", shape);
   }

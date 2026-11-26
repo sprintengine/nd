@@ -85,18 +85,22 @@ export function localDay(instant: Date, timeZone: string): { start: Date; end: D
   };
 }
 
-/** Why a requested window cannot be booked, or undefined when its shape is fine. */
+/**
+ * Why a requested window cannot be booked, or undefined when its shape is
+ * fine. `minMinutes` is the shortest booking ({@link MIN_BOOKING_MINUTES} unless configured).
+ */
 export function windowProblem(
   window: { readonly start: Date; readonly end: Date },
   now: Date,
+  minMinutes: number = MIN_BOOKING_MINUTES,
 ): string | undefined {
   if (window.start.getTime() % MINUTE_MS !== 0 || window.end.getTime() % MINUTE_MS !== 0) {
     return "Start and end must be on a whole minute.";
   }
   if (window.start.getTime() <= now.getTime()) return "The slot must start in the future.";
   const minutes = (window.end.getTime() - window.start.getTime()) / MINUTE_MS;
-  if (minutes < MIN_BOOKING_MINUTES) {
-    return `A booking must be at least ${String(MIN_BOOKING_MINUTES)} minutes long.`;
+  if (minutes < minMinutes) {
+    return `A booking must be at least ${String(minMinutes)} minutes long.`;
   }
   if (minutes > MAX_BOOKING_HOURS * 60) {
     return `A booking may be at most ${String(MAX_BOOKING_HOURS)} hours long.`;
