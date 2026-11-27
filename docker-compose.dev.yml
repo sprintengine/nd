@@ -4,7 +4,7 @@ name: nd-dev
 
 services:
   postgres:
-    image: postgis/postgis:17-3.7@sha256:29619efaa36ece13e4e5abf69fe03f49b4f27f64ef01fc4c3f20b4f2228f7418
+    image: postgis/postgis:18-3.6@sha256:4a43e3c3e5d55b9208240fc71db543b79c638766280c625a425bd0a2390989c4
     # The image is published for amd64 only; Docker emulates it on arm64 hosts.
     platform: linux/amd64
     environment:
