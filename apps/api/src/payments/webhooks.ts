@@ -1,6 +1,7 @@
 import type { HostPayoutStatus } from "@nd/domain";
 import Stripe from "stripe";
 
+import { cancelForPayment } from "../bookings/lifecycle.ts";
 import {
   findBookingDetail,
   findPaymentByIntent,
@@ -83,15 +84,21 @@ async function applyPaymentIntent(
         status: "cancelled",
         stripePaymentIntentId: intent.id,
       });
-    default:
-      // payment_intent.payment_failed: record why; the booking flow decides what follows.
-      return updatePaymentFrom(db, payment.id, ["pending", "authorised"], {
+    default: {
+      // payment_intent.payment_failed: the charge or hold did not go through
+      // and will not; the booking is cancelled (nothing was taken).
+      const reason =
+        intent.last_payment_error?.decline_code ??
+        intent.last_payment_error?.code ??
+        "payment_failed";
+      const failed = await updatePaymentFrom(db, payment.id, ["pending", "authorised"], {
+        status: "failed",
         stripePaymentIntentId: intent.id,
-        failureReason:
-          intent.last_payment_error?.decline_code ??
-          intent.last_payment_error?.code ??
-          "payment_failed",
+        failureReason: reason,
       });
+      if (failed) await cancelForPayment(services, payment.bookingId, reason);
+      return failed;
+    }
   }
 }
 

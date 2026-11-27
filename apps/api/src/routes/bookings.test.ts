@@ -341,6 +341,22 @@ describe("POST /bookings", () => {
     expect(jobs.sent.map((job) => job.name)).toEqual(["notify"]);
   });
 
+  it("cancels the booking, and does not retry, when Stripe refuses the charge for good", async () => {
+    payments.state.charge = { status: "rejected", code: "account_invalid" };
+    const response = await send("POST", "/bookings", request);
+    expect(response.statusCode).toBe(402);
+    expect(data.updatePaymentFrom).toHaveBeenCalledWith(
+      expect.anything(),
+      PAYMENT_ID,
+      ["pending"],
+      {
+        status: "failed",
+        failureReason: "account_invalid",
+      },
+    );
+    expect(jobs.sent.map((job) => job.name)).not.toContain("resume-payment");
+  });
+
   it("keeps the booking with its payment pending, and resumes it, when Stripe does not answer", async () => {
     payments.state.charge = { status: "error" };
     const response = await send("POST", "/bookings", request);

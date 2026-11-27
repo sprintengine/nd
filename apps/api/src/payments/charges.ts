@@ -11,6 +11,7 @@ import {
 } from "../data/payments.ts";
 import { HttpProblem } from "../http/problem.ts";
 import type { Services } from "../services.ts";
+import { type ChargeResult, PaymentRejectedError } from "../stripe/payments.ts";
 
 // The money side of a booking, paid upfront as one destination charge to the
 // host's connected account. Each step is one Stripe call with an idempotency
@@ -33,16 +34,33 @@ export type MoneyOutcome = "paid" | "authorised" | "pending" | "failed" | "cance
 /** Why a payment's outcome is not known, recorded until it is resumed. */
 const OUTCOME_UNKNOWN = "outcome_unknown";
 
-/** Calls Stripe; a problem the API itself raised (payments not configured) passes through. */
+/** Stripe refused a call for good; `code` is why. */
+class Rejected {
+  readonly code: string;
+  constructor(code: string) {
+    this.code = code;
+  }
+}
+
+/**
+ * Calls Stripe. Undefined when it did not answer (or answered with an error
+ * worth retrying): the call is resumed later with the same key. A `Rejected`
+ * when Stripe refused it for good. A problem the API itself raised (payments
+ * not configured) passes through.
+ */
 async function attempt<T>(
   services: Services,
   context: Record<string, unknown>,
   call: () => Promise<T>,
-): Promise<T | undefined> {
+): Promise<T | Rejected | undefined> {
   try {
     return await call();
   } catch (error) {
     if (error instanceof HttpProblem) throw error;
+    if (error instanceof PaymentRejectedError) {
+      services.log.error({ ...context, err: error }, "Stripe refused a payment call; not retried");
+      return new Rejected(error.code);
+    }
     services.log.error({ ...context, err: error }, "payment call failed; it will be resumed");
     return undefined;
   }
@@ -73,10 +91,39 @@ export async function chargeBooking(
       idempotencyKey: paymentKeys.charge(bookingId),
     }),
   );
+  return recordCharge(services, payment, result);
+}
+
+/**
+ * Asks Stripe how a charge it already has (its PaymentIntent) ended, instead
+ * of replaying the create, whose saved answer would never change.
+ */
+export async function refreshCharge(services: Services, payment: Payment): Promise<MoneyOutcome> {
+  const intentId = payment.stripePaymentIntentId;
+  if (intentId === null) return "unknown";
+  const result = await attempt(services, { bookingId: payment.bookingId }, () =>
+    services.payments.retrieveCharge(intentId),
+  );
+  return recordCharge(services, payment, result);
+}
+
+/** Records what became of a charge on its payment, still pending. */
+async function recordCharge(
+  services: Services,
+  payment: Payment,
+  result: ChargeResult | Rejected | undefined,
+): Promise<MoneyOutcome> {
   const db = services.db;
   if (result === undefined) {
     await updatePaymentFrom(db, payment.id, ["pending"], { failureReason: OUTCOME_UNKNOWN });
     return "unknown";
+  }
+  if (result instanceof Rejected) {
+    await updatePaymentFrom(db, payment.id, ["pending"], {
+      status: "failed",
+      failureReason: result.code,
+    });
+    return "failed";
   }
   switch (result.status) {
     case "paid":
@@ -121,10 +168,10 @@ export async function captureHold(services: Services, payment: Payment): Promise
     }),
   );
   if (result === undefined) return "unknown";
-  if (result.status === "failed") {
+  if (result instanceof Rejected || result.status === "failed") {
     await updatePaymentFrom(services.db, payment.id, ["authorised"], {
       status: "failed",
-      failureReason: result.reason,
+      failureReason: result instanceof Rejected ? result.code : result.reason,
     });
     return "failed";
   }
@@ -152,6 +199,18 @@ export async function releaseHold(services: Services, payment: Payment): Promise
     return true;
   });
   if (released === undefined) return "unknown";
+  if (released instanceof Rejected) {
+    // Nothing was charged; Stripe lets the hold lapse. Support may need to look.
+    await updatePaymentFrom(services.db, payment.id, ["authorised"], {
+      status: "failed",
+      failureReason: `release_refused: ${released.code}`,
+    });
+    services.log.error(
+      { bookingId: payment.bookingId },
+      "a hold could not be released; needs support",
+    );
+    return "failed";
+  }
   await updatePaymentFrom(services.db, payment.id, ["authorised"], { status: "cancelled" });
   return "cancelled";
 }
@@ -181,6 +240,14 @@ export async function sendRefund(
       }),
   );
   if (result === undefined) return "pending";
+  if (result instanceof Rejected) {
+    await updatePendingRefund(services.db, refund.id, {
+      status: "failed",
+      failureReason: result.code,
+    });
+    refundFailed(services, payment, refund.id);
+    return "failed";
+  }
   await updatePendingRefund(services.db, refund.id, {
     status: result.status,
     stripeRefundId: result.id,
@@ -212,12 +279,14 @@ export async function checkPendingRefunds(services: Services, payment: Payment):
       () => services.payments.retrieveRefund(stripeRefundId),
     );
     if (found === undefined) continue;
+    const status = found instanceof Rejected ? "failed" : found.status;
     await recordStripeRefund(services.db, {
       stripeRefundId,
       refundId: refund.id,
-      status: found.status,
+      status,
+      ...(found instanceof Rejected ? { failureReason: found.code } : {}),
     });
-    if (found.status === "failed") refundFailed(services, payment, refund.id);
+    if (status === "failed") refundFailed(services, payment, refund.id);
   }
 }
 

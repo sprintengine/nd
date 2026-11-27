@@ -15,7 +15,11 @@ import type {
 import { type AnyJob, type JobRunner, runAttempt, type SendOptions } from "../src/jobs/jobs.ts";
 import type { PushDevice, PushMessage, PushOutcome, PushSender } from "../src/push/push.ts";
 import type { EmailMessage, EmailSender, SmsMessage, SmsSender } from "../src/senders/senders.ts";
-import type { SavedCard, StripePayments } from "../src/stripe/payments.ts";
+import {
+  PaymentRejectedError,
+  type SavedCard,
+  type StripePayments,
+} from "../src/stripe/payments.ts";
 import type { StripeConnect } from "../src/stripe/stripe.ts";
 
 /** Email and SMS senders that keep every message for the test to read. */
@@ -263,10 +267,14 @@ export function fakePayments() {
       | { status: "ok" }
       | { status: "processing" }
       | { status: "failed"; reason: string }
-      | { status: "error" },
+      | { status: "error" }
+      | { status: "rejected"; code: string },
     capture: "ok" as "ok" | "lapsed" | "error",
     release: "ok" as "ok" | "error",
-    refund: "succeeded" as "succeeded" | "pending" | "error",
+    refund: "succeeded" as "succeeded" | "pending" | "error" | "rejected",
+    /** What Stripe says about a PaymentIntent it was asked about later. */
+    retrievedCharge: { status: "paid" } as
+      { status: "paid" } | { status: "pending" } | { status: "failed"; reason: string },
     /** What Stripe says about a refund it was asked about later. */
     retrievedRefund: "succeeded" as "succeeded" | "pending" | "failed",
     deleteCustomer: "ok" as "ok" | "error",
@@ -303,6 +311,9 @@ export function fakePayments() {
       const paymentIntentId = `pi_${String(state.intents)}`;
       const outcome = state.charge;
       if (outcome.status === "error") return Promise.reject(new Error("network down"));
+      if (outcome.status === "rejected") {
+        return Promise.reject(new PaymentRejectedError(outcome.code, "refused"));
+      }
       if (outcome.status === "failed") {
         return Promise.resolve({ status: "failed", paymentIntentId, reason: outcome.reason });
       }
@@ -313,6 +324,17 @@ export function fakePayments() {
         input.captureMethod === "manual"
           ? { status: "authorised", paymentIntentId }
           : { status: "paid", paymentIntentId, chargeId: `ch_${paymentIntentId}` },
+      );
+    },
+    retrieveCharge: (paymentIntentId) => {
+      record("retrieveCharge", paymentIntentId);
+      const found = state.retrievedCharge;
+      return Promise.resolve(
+        found.status === "paid"
+          ? { status: "paid", paymentIntentId, chargeId: `ch_${paymentIntentId}` }
+          : found.status === "pending"
+            ? { status: "pending", paymentIntentId }
+            : { status: "failed", paymentIntentId, reason: found.reason },
       );
     },
     cancelAuthorisation: (input) => {
@@ -332,6 +354,9 @@ export function fakePayments() {
     refund: (input) => {
       record("refund", input);
       if (state.refund === "error") return Promise.reject(new Error("network down"));
+      if (state.refund === "rejected") {
+        return Promise.reject(new PaymentRejectedError("charge_already_refunded", "refused"));
+      }
       return Promise.resolve({ id: `re_${input.idempotencyKey}`, status: state.refund });
     },
     retrieveRefund: (refundId) => {

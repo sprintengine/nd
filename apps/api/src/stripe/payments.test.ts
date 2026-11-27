@@ -2,7 +2,12 @@ import Stripe from "stripe";
 import { describe, expect, it, vi } from "vitest";
 
 import { HttpProblem } from "../http/problem.ts";
-import { type PaymentsSdk, stripePaymentsFrom, unconfiguredStripePayments } from "./payments.ts";
+import {
+  PaymentRejectedError,
+  type PaymentsSdk,
+  stripePaymentsFrom,
+  unconfiguredStripePayments,
+} from "./payments.ts";
 
 const visa = { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2030 };
 
@@ -295,6 +300,62 @@ describe("stripePaymentsFrom", () => {
       status: "failed",
     });
     expect(sdk.refunds.retrieve).toHaveBeenCalledWith("re_1");
+  });
+
+  it("tells a refusal that will not go away from an error worth retrying", async () => {
+    const { sdk, payments } = fakeSdk();
+    const input = {
+      paymentIntentId: "pi_1",
+      amountCents: 500,
+      metadata: {},
+      idempotencyKey: "refund-r1",
+    };
+    sdk.refunds.create.mockRejectedValueOnce(
+      new Stripe.errors.StripeInvalidRequestError({
+        message: "already refunded",
+        code: "charge_already_refunded",
+      }),
+    );
+    await expect(payments.refund(input)).rejects.toEqual(
+      expect.objectContaining({ name: "PaymentRejectedError", code: "charge_already_refunded" }),
+    );
+    sdk.paymentIntents.create.mockRejectedValueOnce(
+      new Stripe.errors.StripePermissionError({
+        message: "capability lost",
+        type: "invalid_request_error",
+      }),
+    );
+    await expect(payments.charge(charge)).rejects.toBeInstanceOf(PaymentRejectedError);
+    for (const transient of [
+      new Stripe.errors.StripeConnectionError({ message: "no route" }),
+      new Stripe.errors.StripeAPIError({ message: "server error" }),
+      new Stripe.errors.StripeRateLimitError({ message: "slow down" }),
+      new Stripe.errors.StripeIdempotencyError({
+        message: "in use",
+        code: "idempotency_key_in_use",
+      }),
+    ]) {
+      sdk.paymentIntents.capture.mockRejectedValueOnce(transient);
+      await expect(payments.capture({ paymentIntentId: "pi_1", idempotencyKey: "k" })).rejects.toBe(
+        transient,
+      );
+    }
+  });
+
+  it("looks a PaymentIntent up by id", async () => {
+    const { sdk, payments } = fakeSdk();
+    sdk.paymentIntents.retrieve.mockResolvedValueOnce(intent({ status: "processing" }));
+    await expect(payments.retrieveCharge("pi_1")).resolves.toEqual({
+      status: "pending",
+      paymentIntentId: "pi_1",
+    });
+    sdk.paymentIntents.retrieve.mockResolvedValueOnce(
+      intent({ status: "requires_payment_method" }),
+    );
+    await expect(payments.retrieveCharge("pi_1")).resolves.toMatchObject({
+      status: "failed",
+      reason: "requires_payment_method",
+    });
   });
 
   it("deletes a customer, accepting one already gone", async () => {

@@ -145,16 +145,35 @@ describe("resume-payment", () => {
   });
 
   it("throws, so the job retries, while Stripe still does not answer", async () => {
-    given({ payment: { status: "pending" } });
+    given({ payment: { status: "pending", stripePaymentIntentId: null } });
     env.payments.state.charge = { status: "error" };
     await expect(run()).rejects.toThrow(/still unknown/);
   });
 
-  it("cancels the booking when the charge turns out declined", async () => {
-    given({ payment: { status: "pending" } });
-    env.payments.state.charge = { status: "failed", reason: "insufficient_funds" };
+  it("asks Stripe how a charge it has ended, instead of replaying the create", async () => {
+    given({ payment: { status: "pending", stripePaymentIntentId: "pi_1" } });
+    env.payments.state.retrievedCharge = { status: "failed", reason: "requires_payment_method" };
     vi.mocked(data.findPayment)
       .mockResolvedValueOnce(payment({ status: "pending" }))
+      .mockResolvedValueOnce(
+        payment({ status: "failed", failureReason: "requires_payment_method" }),
+      );
+    await run();
+    expect(env.payments.callsTo("charge")).toEqual([]);
+    expect(env.payments.callsTo("retrieveCharge")).toEqual([
+      { method: "retrieveCharge", input: "pi_1" },
+    ]);
+    expect(vi.mocked(data.updateBookingFrom).mock.calls[0]?.[3]).toMatchObject({
+      cancelledBy: "system",
+      cancellationReason: "payment_failed: requires_payment_method",
+    });
+  });
+
+  it("cancels the booking when the charge turns out declined", async () => {
+    given({ payment: { status: "pending", stripePaymentIntentId: null } });
+    env.payments.state.charge = { status: "failed", reason: "insufficient_funds" };
+    vi.mocked(data.findPayment)
+      .mockResolvedValueOnce(payment({ status: "pending", stripePaymentIntentId: null }))
       .mockResolvedValueOnce(payment({ status: "failed", failureReason: "insufficient_funds" }));
     await run();
     expect(vi.mocked(data.updateBookingFrom).mock.calls[0]?.[3]).toMatchObject({
@@ -164,7 +183,10 @@ describe("resume-payment", () => {
   });
 
   it("leaves a pending payment it cannot charge for support", async () => {
-    given({ payment: { status: "pending" }, host: { stripeAccountId: null } });
+    given({
+      payment: { status: "pending", stripePaymentIntentId: null },
+      host: { stripeAccountId: null },
+    });
     await run();
     expect(env.payments.calls).toHaveLength(0);
   });
@@ -239,6 +261,32 @@ describe("resume-payment", () => {
       stripeRefundId: "re_1",
       refundId: "r1",
       status: "failed",
+    });
+  });
+
+  it("marks a refund Stripe refuses for good failed, for support, without retrying", async () => {
+    given({ booking: { status: "cancelled" } });
+    const refund = {
+      id: "r2",
+      paymentId: PAYMENT_ID,
+      amountCents: 1000,
+      currency: "EUR" as const,
+      reason: "host_cancelled" as const,
+      status: "pending" as const,
+      stripeRefundId: null,
+      issuedById: null,
+      note: null,
+      operationId: null,
+      failureReason: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    vi.mocked(paymentData.unsentRefunds).mockResolvedValueOnce([refund]).mockResolvedValueOnce([]);
+    env.payments.state.refund = "rejected";
+    await expect(run()).resolves.toBeUndefined();
+    expect(paymentData.updatePendingRefund).toHaveBeenCalledWith(expect.anything(), "r2", {
+      status: "failed",
+      failureReason: "charge_already_refunded",
     });
   });
 

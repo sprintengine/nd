@@ -5,6 +5,7 @@ import {
   chargeBooking,
   checkPendingRefunds,
   type MoneyOutcome,
+  refreshCharge,
   releaseHold,
   sendUnsentRefunds,
 } from "../payments/charges.ts";
@@ -37,12 +38,17 @@ export async function resumePayment(services: Services, paymentId: string): Prom
   if (payment.status === "pending") {
     const customerId = detail.driver.stripeCustomerId;
     const destination = detail.host.stripeAccountId;
-    if (customerId === null || destination === null) {
+    let outcome;
+    if (payment.stripePaymentIntentId !== null) {
+      // Stripe has the PaymentIntent (it was processing): ask how it ended.
+      outcome = await refreshCharge(services, payment);
+    } else if (customerId === null || destination === null) {
       services.log.error({ paymentId }, "a pending payment has no customer or host account");
       return "nothing";
+    } else {
+      // No answer at all: the same idempotency key, so Stripe answers with what it did then.
+      outcome = await chargeBooking(services, payment, { customerId, destination });
     }
-    // The same idempotency key as the first attempt: Stripe answers with what it did then.
-    const outcome = await chargeBooking(services, payment, { customerId, destination });
     if (outcome === "unknown") throw new StillUnknownError(`payment ${paymentId} is still unknown`);
     const reloaded = await findPayment(services.db, paymentId);
     if (reloaded === undefined) return "nothing";

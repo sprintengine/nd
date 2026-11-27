@@ -150,21 +150,6 @@ describe("POST /webhooks/stripe", () => {
       },
     ],
     ["payment_intent.canceled", {}, { status: "cancelled", stripePaymentIntentId: "pi_1" }],
-    [
-      "payment_intent.payment_failed",
-      { last_payment_error: { decline_code: "insufficient_funds" } },
-      { stripePaymentIntentId: "pi_1", failureReason: "insufficient_funds" },
-    ],
-    [
-      "payment_intent.payment_failed",
-      { last_payment_error: { code: "expired_card" } },
-      { stripePaymentIntentId: "pi_1", failureReason: "expired_card" },
-    ],
-    [
-      "payment_intent.payment_failed",
-      { last_payment_error: null },
-      { stripePaymentIntentId: "pi_1", failureReason: "payment_failed" },
-    ],
   ])("records %s on the payment", async (type, fields, change) => {
     const response = await post(event(type, { id: "pi_1", metadata: {}, ...fields }));
     expect(response.json()).toMatchObject({ outcome: "processed" });
@@ -175,6 +160,47 @@ describe("POST /webhooks/stripe", () => {
       change,
     );
     expect(payments.calls).toEqual([]);
+  });
+
+  it.each([
+    [{ decline_code: "insufficient_funds" }, "insufficient_funds"],
+    [{ code: "expired_card" }, "expired_card"],
+    [null, "payment_failed"],
+  ])("fails the payment and cancels the booking on payment_failed (%j)", async (error, reason) => {
+    vi.mocked(data.updateBookingFrom).mockResolvedValue(true);
+    const response = await post(
+      event("payment_intent.payment_failed", {
+        id: "pi_1",
+        metadata: {},
+        last_payment_error: error,
+      }),
+    );
+    expect(response.json()).toMatchObject({ outcome: "processed" });
+    expect(data.updatePaymentFrom).toHaveBeenCalledWith(
+      expect.anything(),
+      PAYMENT_ID,
+      ["pending", "authorised"],
+      { status: "failed", stripePaymentIntentId: "pi_1", failureReason: reason },
+    );
+    expect(data.updateBookingFrom).toHaveBeenCalledWith(
+      expect.anything(),
+      BOOKING_ID,
+      ["requested", "confirmed"],
+      expect.objectContaining({
+        cancelledBy: "system",
+        cancellationReason: `payment_failed: ${reason}`,
+      }),
+    );
+    expect(payments.calls).toEqual([]);
+  });
+
+  it("leaves the booking alone when the payment had already settled", async () => {
+    vi.mocked(data.updatePaymentFrom).mockResolvedValue(false);
+    const response = await post(
+      event("payment_intent.payment_failed", { id: "pi_1", metadata: {} }),
+    );
+    expect(response.json()).toMatchObject({ outcome: "ignored" });
+    expect(data.updateBookingFrom).not.toHaveBeenCalled();
   });
 
   it("records each refund's own status, by its Stripe id or our refund id", async () => {

@@ -87,6 +87,8 @@ export interface StripePayments {
     readonly captureMethod: "automatic" | "manual";
     readonly idempotencyKey: string;
   }): Promise<ChargeResult>;
+  /** A PaymentIntent made earlier, as Stripe has it now. */
+  retrieveCharge(paymentIntentId: string): Promise<ChargeResult>;
   /** Releases a hold. Succeeds if it was already released. */
   cancelAuthorisation(input: {
     readonly paymentIntentId: string;
@@ -190,8 +192,71 @@ export function refundStatusOf(
   return "pending";
 }
 
-/** Payments on top of the Stripe SDK. */
+/** What a PaymentIntent's status means for the booking's charge. */
+function chargeResultOf(intent: PaymentIntentLike): ChargeResult {
+  if (intent.status === "succeeded") {
+    return { status: "paid", paymentIntentId: intent.id, chargeId: idOf(intent.latest_charge) };
+  }
+  if (intent.status === "requires_capture") {
+    return { status: "authorised", paymentIntentId: intent.id };
+  }
+  if (intent.status === "processing") return { status: "pending", paymentIntentId: intent.id };
+  return { status: "failed", paymentIntentId: intent.id, reason: intent.status };
+}
+
+/**
+ * Stripe refused a call and would refuse it again (an invalid request, a
+ * permission or capability lost, a charge already refunded): retrying with
+ * the same key cannot help. `code` is Stripe's error code.
+ */
+export class PaymentRejectedError extends Error {
+  override name = "PaymentRejectedError";
+  readonly code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+/** Whether a Stripe error may go away: no answer, a server error, a rate limit, or a request still in flight. */
+function isTransient(error: Stripe.errors.StripeError): boolean {
+  return (
+    error instanceof Stripe.errors.StripeConnectionError ||
+    error instanceof Stripe.errors.StripeAPIError ||
+    error instanceof Stripe.errors.StripeRateLimitError ||
+    error.code === "idempotency_key_in_use" ||
+    error.code === "lock_timeout" ||
+    (error.statusCode ?? 0) >= 500
+  );
+}
+
+/** Turns a Stripe error that will not go away into a `PaymentRejectedError`; passes the rest on. */
+function rejectPermanent(error: unknown): never {
+  if (error instanceof Stripe.errors.StripeError && !isTransient(error)) {
+    throw new PaymentRejectedError(error.code ?? error.type, error.message);
+  }
+  throw error;
+}
+
+/**
+ * Payments on top of the Stripe SDK. In the calls that move money, a Stripe
+ * error that will not go away becomes a `PaymentRejectedError`, so callers
+ * can tell it from one worth retrying.
+ */
 export function stripePaymentsFrom(sdk: PaymentsSdk): StripePayments {
+  const calls = stripeCalls(sdk);
+  return {
+    ...calls,
+    charge: (input) => calls.charge(input).catch(rejectPermanent),
+    retrieveCharge: (id) => calls.retrieveCharge(id).catch(rejectPermanent),
+    cancelAuthorisation: (input) => calls.cancelAuthorisation(input).catch(rejectPermanent),
+    capture: (input) => calls.capture(input).catch(rejectPermanent),
+    refund: (input) => calls.refund(input).catch(rejectPermanent),
+    retrieveRefund: (id) => calls.retrieveRefund(id).catch(rejectPermanent),
+  };
+}
+
+function stripeCalls(sdk: PaymentsSdk): StripePayments {
   return {
     async createCustomer({ userId, email, name }) {
       const customer = await sdk.customers.create(
@@ -274,19 +339,7 @@ export function stripePaymentsFrom(sdk: PaymentsSdk): StripePayments {
           },
           { idempotencyKey },
         );
-        if (intent.status === "succeeded") {
-          return {
-            status: "paid",
-            paymentIntentId: intent.id,
-            chargeId: idOf(intent.latest_charge),
-          };
-        }
-        if (intent.status === "requires_capture") {
-          return { status: "authorised", paymentIntentId: intent.id };
-        }
-        if (intent.status === "processing")
-          return { status: "pending", paymentIntentId: intent.id };
-        return { status: "failed", paymentIntentId: intent.id, reason: intent.status };
+        return chargeResultOf(intent);
       } catch (error) {
         if (error instanceof Stripe.errors.StripeCardError) {
           // A card error's decline code is empty when the issuer gave none.
@@ -302,6 +355,10 @@ export function stripePaymentsFrom(sdk: PaymentsSdk): StripePayments {
         }
         throw error;
       }
+    },
+
+    async retrieveCharge(paymentIntentId) {
+      return chargeResultOf(await sdk.paymentIntents.retrieve(paymentIntentId));
     },
 
     async cancelAuthorisation({ paymentIntentId, idempotencyKey }) {
@@ -385,6 +442,7 @@ export const unconfiguredStripePayments: StripePayments = {
   findCard: unavailable,
   setDefaultCard: unavailable,
   charge: unavailable,
+  retrieveCharge: unavailable,
   cancelAuthorisation: unavailable,
   capture: unavailable,
   refund: unavailable,
