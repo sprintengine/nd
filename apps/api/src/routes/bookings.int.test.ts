@@ -397,6 +397,44 @@ describe("POST /bookings", () => {
     expect(fourth.json()).toMatchObject({ code: "too-many-requests" });
   });
 
+  it("holds the cap on waiting requests when a driver's requests race", async () => {
+    const asker = await h.user("una@example.com", "+353861230107");
+    const [askerUser] = await h.database.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, "una@example.com"));
+    await call("POST", "/me/payment-methods/setup-intent", asker);
+    const [row] = await h.database.db
+      .select({ customerId: users.stripeCustomerId })
+      .from(users)
+      .where(eq(users.id, askerUser?.id ?? ""));
+    h.stripeMock.saveCard(row?.customerId ?? "", "pm_card_una");
+    // Two waiting already; two more race for the last place, at two different hosts' chargers.
+    const first = await listCharger({ instantBook: false });
+    for (const days of [24, 25]) {
+      expect((await book(first, nightIn(days), 1, asker)).statusCode).toBe(201);
+    }
+    const others = [
+      await listCharger({ instantBook: false }),
+      await listCharger({ instantBook: false }),
+    ];
+    const codes = await Promise.all(
+      others.map((chargerId) =>
+        createBooking(services, {
+          driverId: askerUser?.id ?? "",
+          chargerId,
+          window: { start: nightIn(26), end: new Date(nightIn(26).getTime() + HOUR) },
+          vehiclePlate: "251-D-3",
+          paymentMethodId: undefined,
+        }).then(
+          () => "booked",
+          (error: unknown) => (error as { code?: string }).code,
+        ),
+      ),
+    );
+    expect(codes.sort()).toEqual(["booked", "too-many-requests"]);
+  });
+
   it("needs a verified phone and a saved card", async () => {
     const chargerId = await listCharger();
     const unverified = await h.user("oisin@example.com");

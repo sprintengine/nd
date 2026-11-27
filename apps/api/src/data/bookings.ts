@@ -160,15 +160,18 @@ export interface DailyCap {
   readonly hostId: string;
   readonly day: { start: Date; end: Date };
   readonly maxSessionsPerDay: number;
+  /** Most requests one driver may have waiting; checked for a request only. */
+  readonly maxOpenRequests: number;
 }
 
 /** Why a booking was not inserted. */
-export type InsertRefusal = "slot-taken" | "host-day-full";
+export type InsertRefusal = "slot-taken" | "host-day-full" | "too-many-requests";
 
 /**
  * Inserts a booking and its payment (pending) in one transaction. A
  * transaction-scoped advisory lock on the host serialises bookings of their
- * chargers, so their daily cap holds under concurrent requests; the charger
+ * chargers, so their daily cap holds under concurrent requests (and one on the
+ * driver, for a request, so their cap on waiting requests holds too); the charger
  * row is locked too, so a request is checked against slot-holding bookings
  * without a race, and a confirmed booking also relies on the exclusion
  * constraint.
@@ -186,6 +189,15 @@ export function insertBookingWithPayment(
       );
       if ((await hostBookingsStarting(tx, cap.hostId, cap.day)) >= cap.maxSessionsPerDay) {
         return "host-day-full";
+      }
+      if (booking.status === "requested") {
+        // Serialises one driver's requests, so the cap holds across hosts too.
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${`driver-requests:${booking.driverId}`}))`,
+        );
+        if ((await openRequestCount(tx, booking.driverId)) >= cap.maxOpenRequests) {
+          return "too-many-requests";
+        }
       }
       await tx
         .select({ id: chargers.id })

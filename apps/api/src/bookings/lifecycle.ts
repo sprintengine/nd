@@ -14,7 +14,6 @@ import {
   findBookingDetail,
   findCustomer,
   insertBookingWithPayment,
-  openRequestCount,
   type Payment,
   slotTaken,
   updateBookingFrom,
@@ -202,14 +201,6 @@ export async function createBooking(services: Services, request: BookingRequest)
       "Pick a slot inside one of the host's availability windows.",
     );
   }
-  if (!rule.instantBook && (await openRequestCount(db, request.driverId)) >= MAX_OPEN_REQUESTS) {
-    throw new HttpProblem(
-      409,
-      "too-many-requests",
-      "You have too many requests waiting",
-      `Wait for a host to answer, or cancel a request: at most ${String(MAX_OPEN_REQUESTS)} can wait at once.`,
-    );
-  }
   if (await slotTaken(db, charger.id, window)) throw slotTakenProblem();
 
   const priceCents = quote(window, rule.pricePerHourCents);
@@ -250,9 +241,18 @@ export async function createBooking(services: Services, request: BookingRequest)
       hostId: charger.hostId,
       day: localDay(window.start, charger.timezone),
       maxSessionsPerDay: charger.maxSessionsPerDay,
+      maxOpenRequests: MAX_OPEN_REQUESTS,
     },
   );
   if (inserted === "slot-taken") throw slotTakenProblem();
+  if (inserted === "too-many-requests") {
+    throw new HttpProblem(
+      409,
+      "too-many-requests",
+      "You have too many requests waiting",
+      `Wait for a host to answer, or cancel a request: at most ${String(MAX_OPEN_REQUESTS)} can wait at once.`,
+    );
+  }
   if (inserted === "host-day-full") {
     throw new HttpProblem(
       409,

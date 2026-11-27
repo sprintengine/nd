@@ -68,7 +68,6 @@ beforeEach(() => {
   signInAs(app);
   vi.mocked(data.findBookableCharger).mockResolvedValue(charger);
   vi.mocked(listing.chargerRules).mockResolvedValue([rule()]);
-  vi.mocked(data.openRequestCount).mockResolvedValue(0);
   vi.mocked(data.slotTaken).mockResolvedValue(false);
   vi.mocked(data.findCustomer).mockResolvedValue({
     id: USER_ID,
@@ -142,7 +141,7 @@ describe("POST /bookings", () => {
       cardFeeCents: 40,
       captureMethod: "automatic",
     });
-    expect(cap).toMatchObject({ hostId: "host-1", maxSessionsPerDay: 2 });
+    expect(cap).toMatchObject({ hostId: "host-1", maxSessionsPerDay: 2, maxOpenRequests: 3 });
     expect(payments.callsTo("charge")[0]?.input).toEqual({
       bookingId: BOOKING_ID,
       amountCents: 1000,
@@ -277,10 +276,7 @@ describe("POST /bookings", () => {
     [
       "too-many-requests",
       409,
-      () => {
-        vi.mocked(listing.chargerRules).mockResolvedValue([rule({ instantBook: false })]);
-        vi.mocked(data.openRequestCount).mockResolvedValue(3);
-      },
+      () => vi.mocked(data.insertBookingWithPayment).mockResolvedValue("too-many-requests"),
     ],
     [
       "host-day-full",
@@ -304,12 +300,6 @@ describe("POST /bookings", () => {
     expect(response.statusCode).toBe(status);
     expect(response.json()).toMatchObject({ code });
     expect(payments.callsTo("charge")).toHaveLength(0);
-  });
-
-  it("lets a driver with requests waiting still book instantly", async () => {
-    vi.mocked(data.openRequestCount).mockResolvedValue(3);
-    expect((await send("POST", "/bookings", request)).statusCode).toBe(201);
-    expect(data.openRequestCount).not.toHaveBeenCalled();
   });
 
   it("refuses a slot that is not bookable as asked", async () => {
