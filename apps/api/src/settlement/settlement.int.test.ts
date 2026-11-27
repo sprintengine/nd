@@ -592,7 +592,7 @@ describe("an arrival that never got a session", () => {
   });
 
   /** A start that timed out, and the connector state the charger reported just after. */
-  async function timedOut(booked: Booked, connector: "Preparing" | "Available") {
+  async function timedOut(booked: Booked, connector: "Preparing" | "Charging" | "Available") {
     const failedAt = new Date(booked.slot.start.getTime() + 2 * MINUTE);
     await h.database.db.insert(sessions).values({
       bookingId: booked.bookingId,
@@ -632,6 +632,17 @@ describe("an arrival that never got a session", () => {
       expect(await statusOf(booked.bookingId)).toBe("no_show");
       expect(await refundsOf(booked.bookingId)).toEqual([]);
     }
+  });
+
+  it("is refunded in full when the start timed out with the charger saying it was charging", async () => {
+    // A charger that thinks it is charging but never sent StartTransaction.
+    const booked = await arrivedBooking();
+    await timedOut(booked, "Charging");
+    clock.current = new Date(booked.slot.end.getTime() + 11 * MINUTE);
+    await h.jobs.runNow(settlementSweepJob, {});
+    await h.jobs.drain();
+    expect(await statusOf(booked.bookingId)).toBe("completed");
+    expect(await refundsOf(booked.bookingId)).toMatchObject([{ reason: "charger_fault" }]);
   });
 
   it("is refunded in full, automatically, when the charger never started", async () => {

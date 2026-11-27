@@ -154,8 +154,8 @@ const CHARGER_SIDE_START_FAILURES = [
   "rejected",
 ];
 
-/** Connector states that mean a cable was plugged in. */
-const CABLE_CONNECTED = ["Preparing", "SuspendedEV"];
+/** Connector states that mean a cable was plugged in (OCPP 1.6 ChargePointStatus). */
+const CABLE_CONNECTED = ["Preparing", "Charging", "SuspendedEV", "SuspendedEVSE", "Finishing"];
 
 /**
  * Whether a failed start of the booking was the charger's doing: it was
