@@ -6,15 +6,16 @@
 // than that, so each request is first sent to stripe-mock (a request Stripe
 // would refuse is refused here with stripe-mock's answer), then answered from
 // state kept here, applying the changes Stripe documents: unique ids, cards
-// saved by confirming a SetupIntent, a confirmed manual-capture intent
-// `requires_capture`, partial captures, cancellations and transfers.
-// Requests with an Idempotency-Key are replayed.
+// saved by confirming a SetupIntent, destination charges (a confirmed intent
+// `succeeded`, or `requires_capture` with manual capture), captures,
+// cancellations, refunds and deleted customers. Requests with an
+// Idempotency-Key are replayed.
 //
 // Tests drive it the way the app and Stripe would: POST
 // /v1/setup_intents/:id/confirm stands in for the app confirming a card with
 // Stripe's SDK. Under /__double/ they can read what happened (accounts by
-// host, intents and transfers by booking) and make the next authorisation of
-// a customer decline.
+// host, intents and refunds by booking) and make the next charge of a
+// customer decline.
 //
 // Node runs this file directly (type stripping); it uses only built-ins.
 
@@ -51,6 +52,9 @@ interface Intent {
   latestCharge: string | null;
   readonly metadata: Record<string, string>;
   readonly transferGroup: string | null;
+  /** The connected account a destination charge pays. */
+  readonly destination: string | null;
+  readonly applicationFeeAmount: number | null;
 }
 
 const accounts = new Map<string, { id: string; email: string | null; metadata: Json }>();
@@ -64,13 +68,12 @@ const setupIntents = new Map<
 >();
 const cards = new Map<string, Card>();
 const intents = new Map<string, Intent>();
-const transfers: {
+const refunds: {
   id: string;
+  paymentIntent: string;
   amount: number;
-  currency: string;
-  destination: string;
-  sourceTransaction: string | null;
-  transferGroup: string | null;
+  reverseTransfer: boolean;
+  refundApplicationFee: boolean;
   metadata: Json;
 }[] = [];
 const declines = new Map<string, string[]>();
@@ -121,6 +124,8 @@ function intentView(intent: Intent): Json {
     payment_method: intent.paymentMethod,
     status: intent.status,
     transfer_group: intent.transferGroup,
+    transfer_data: intent.destination === null ? null : { destination: intent.destination },
+    application_fee_amount: intent.applicationFeeAmount,
     created: now(),
     livemode: false,
   };
@@ -216,6 +221,13 @@ function apply(
     }
     const customer = id === undefined ? undefined : customers.get(id);
     if (customer === undefined) return missing("customer", id ?? "");
+    if (method === "DELETE") {
+      customers.delete(customer.id);
+      for (const card of [...cards.values()]) {
+        if (card.customer === customer.id) cards.delete(card.id);
+      }
+      return { status: 200, body: { id: customer.id, object: "customer", deleted: true } };
+    }
     if (method === "POST") {
       const card = form.get("invoice_settings[default_payment_method]");
       if (card !== null) customer.defaultCard = card === "" ? null : card;
@@ -287,6 +299,11 @@ function apply(
         latestCharge: null,
         metadata: metadataOf(form),
         transferGroup: form.get("transfer_group"),
+        destination: form.get("transfer_data[destination]"),
+        applicationFeeAmount:
+          form.get("application_fee_amount") === null
+            ? null
+            : Number(form.get("application_fee_amount")),
       };
       intents.set(intent.id, intent);
       const card = paymentMethod === null ? undefined : cards.get(paymentMethod);
@@ -346,30 +363,43 @@ function apply(
     return { status: 200, body: intentView(intent) };
   }
 
-  if (resource === "transfers" && method === "POST" && id === undefined) {
-    const transfer = {
-      id: newId("tr"),
-      amount: Number(form.get("amount")),
-      currency: form.get("currency") ?? "eur",
-      destination: form.get("destination") ?? "",
-      sourceTransaction: form.get("source_transaction"),
-      transferGroup: form.get("transfer_group"),
+  if (resource === "refunds" && method === "POST" && id === undefined) {
+    const intentId = form.get("payment_intent") ?? "";
+    const intent = intents.get(intentId);
+    if (intent === undefined) return missing("payment_intent", intentId);
+    const refunded = refunds
+      .filter((refund) => refund.paymentIntent === intent.id)
+      .reduce((total, refund) => total + refund.amount, 0);
+    const amount = Number(form.get("amount") ?? intent.amountReceived - refunded);
+    if (intent.status !== "succeeded" || refunded + amount > intent.amountReceived) {
+      return stripeError(
+        400,
+        "invalid_request_error",
+        "charge_already_refunded",
+        "This charge cannot be refunded for that amount",
+      );
+    }
+    const refund = {
+      id: newId("re"),
+      paymentIntent: intent.id,
+      amount,
+      reverseTransfer: form.get("reverse_transfer") === "true",
+      refundApplicationFee: form.get("refund_application_fee") === "true",
       metadata: metadataOf(form),
     };
-    transfers.push(transfer);
+    refunds.push(refund);
     return {
       status: 200,
       body: {
-        id: transfer.id,
-        object: "transfer",
-        amount: transfer.amount,
-        currency: transfer.currency,
-        destination: transfer.destination,
-        source_transaction: transfer.sourceTransaction,
-        transfer_group: transfer.transferGroup,
-        metadata: transfer.metadata,
+        id: refund.id,
+        object: "refund",
+        amount,
+        currency: intent.currency,
+        payment_intent: intent.id,
+        charge: intent.latestCharge,
+        status: "succeeded",
+        metadata: refund.metadata,
         created: now(),
-        livemode: false,
       },
     };
   }
@@ -397,9 +427,16 @@ function inspect(method: string, path: string, query: URLSearchParams): Answer {
       .map((intent) => intentView(intent));
     return { status: 200, body: { data } };
   }
-  if (method === "GET" && path === "/__double/transfers") {
-    const group = query.get("transferGroup");
-    return { status: 200, body: { data: transfers.filter((t) => t.transferGroup === group) } };
+  if (method === "GET" && path === "/__double/refunds") {
+    const bookingId = query.get("bookingId");
+    const data = refunds.filter(
+      (refund) => intents.get(refund.paymentIntent)?.metadata.bookingId === bookingId,
+    );
+    return { status: 200, body: { data } };
+  }
+  if (method === "GET" && path === "/__double/customers") {
+    const id = query.get("id") ?? "";
+    return { status: 200, body: { exists: customers.has(id) } };
   }
   if (method === "POST" && path === "/__double/declines") {
     const customer = query.get("customer") ?? "";

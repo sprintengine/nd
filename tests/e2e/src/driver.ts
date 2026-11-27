@@ -15,11 +15,7 @@ export interface Booking {
   readonly pricePerHourCents: number;
   readonly cancelledBy: string | null;
   readonly addressVisible: boolean;
-  readonly payment: {
-    readonly status: string;
-    readonly authorisedCents: number;
-    readonly capturedCents: number;
-  } | null;
+  readonly payment: { readonly status: string; readonly amountCents: number } | null;
 }
 
 export interface SessionState {
@@ -27,7 +23,7 @@ export interface SessionState {
   readonly sessionId: string | null;
   readonly status: string;
   readonly kwh: number | null;
-  readonly costSoFar: number;
+  readonly elapsed: number;
   readonly stoppedAt: string | null;
   readonly stopReason: string | null;
   readonly failure: { readonly code: string; readonly message: string } | null;

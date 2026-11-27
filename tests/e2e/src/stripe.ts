@@ -95,6 +95,8 @@ export interface DoubleIntent {
   readonly amount_capturable: number;
   readonly amount_received: number;
   readonly capture_method: string;
+  readonly transfer_data: { readonly destination: string } | null;
+  readonly application_fee_amount: number | null;
 }
 
 /** The PaymentIntents Stripe holds for a booking. */
@@ -105,18 +107,17 @@ export async function paymentIntentsFor(bookingId: string): Promise<DoubleIntent
   return data;
 }
 
-export interface DoubleTransfer {
+export interface DoubleRefund {
   readonly id: string;
   readonly amount: number;
-  readonly currency: string;
-  readonly destination: string;
-  readonly sourceTransaction: string | null;
+  readonly reverseTransfer: boolean;
+  readonly refundApplicationFee: boolean;
 }
 
-/** The transfers Stripe made for a booking (its transfer group). */
-export async function transfersFor(bookingId: string): Promise<DoubleTransfer[]> {
-  const { data } = await readDouble<{ data: DoubleTransfer[] }>(
-    `/__double/transfers?transferGroup=${encodeURIComponent(bookingId)}`,
+/** The refunds Stripe made of a booking's payment. */
+export async function refundsFor(bookingId: string): Promise<DoubleRefund[]> {
+  const { data } = await readDouble<{ data: DoubleRefund[] }>(
+    `/__double/refunds?bookingId=${encodeURIComponent(bookingId)}`,
   );
   return data;
 }
