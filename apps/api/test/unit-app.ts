@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { vi } from "vitest";
 
 import { buildApp } from "../src/app.ts";
+import type { AppDeps } from "../src/deps.ts";
 import type { ApiConfig } from "../src/env.ts";
 import { testConfig } from "./config.ts";
 import {
@@ -19,7 +20,10 @@ export const NOW = new Date("2027-01-11T12:00:00Z");
 export const SESSION_COOKIE = { cookie: "better-auth.session_token=abc" };
 
 /** The app over a database that never connects; tests mock every query. */
-export function startUnitApp(config: Partial<ApiConfig> = {}) {
+export function startUnitApp(
+  config: Partial<ApiConfig> = {},
+  options: Pick<AppDeps, "logger"> = {},
+) {
   const events = fakeChargerEvents();
   const stripe = fakeStripe();
   const mail = outbox();
@@ -37,6 +41,7 @@ export function startUnitApp(config: Partial<ApiConfig> = {}) {
     jobs: jobs.runner,
     chargerControl: rejectingChargerControl,
     chargerEvents: events.events,
+    ...options,
   });
   return { app, events, stripe, mail, payments, jobs };
 }

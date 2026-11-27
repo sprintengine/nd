@@ -97,6 +97,25 @@ describe("platform", () => {
     expect(events.isClosed()).toBe(true);
   });
 
+  it("logs request paths without their query strings", async () => {
+    await app.close();
+    const lines: string[] = [];
+    ({ app } = startUnitApp(
+      {},
+      {
+        logger: { ...loggerOptions("info"), stream: { write: (line: string) => lines.push(line) } },
+      },
+    ));
+    await app.inject({
+      method: "GET",
+      url: "/healthz?token=magic-link-token-123&code=oauth-code-456",
+    });
+    const logged = lines.join("\n");
+    expect(logged).toContain('"url":"/healthz"');
+    expect(logged).not.toContain("magic-link-token-123");
+    expect(logged).not.toContain("oauth-code-456");
+  });
+
   it("redacts cookies, authorization and secrets from logs", () => {
     expect(REDACTED_LOG_PATHS).toEqual(
       expect.arrayContaining(["req.headers.cookie", "req.headers.authorization", "*.secret"]),

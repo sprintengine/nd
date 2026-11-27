@@ -3,7 +3,11 @@ import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import swagger from "@fastify/swagger";
 import websocket from "@fastify/websocket";
-import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
+import Fastify, {
+  type FastifyInstance,
+  type FastifyRequest,
+  type FastifyServerOptions,
+} from "fastify";
 import {
   jsonSchemaTransform,
   jsonSchemaTransformObject,
@@ -73,9 +77,29 @@ export const REDACTED_LOG_PATHS = [
 /** A client may send its own request id if it is short and plain; otherwise one is made. */
 const REQUEST_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 
-/** Logger settings: JSON to stdout with secrets redacted. */
-export function loggerOptions(level: string): FastifyServerOptions["logger"] {
-  return { level, redact: { paths: REDACTED_LOG_PATHS, censor: "[redacted]" } };
+/** What a log line says about a request, as Fastify's default does but without the query. */
+function requestLogFields(request: FastifyRequest) {
+  // The query can hold magic-link tokens and OAuth codes; log only the path.
+  const query = request.url.indexOf("?");
+  const port = request.socket.remotePort;
+  return {
+    method: request.method,
+    url: query === -1 ? request.url : request.url.slice(0, query),
+    host: request.host,
+    remoteAddress: request.ip,
+    ...(port === undefined ? {} : { remotePort: port }),
+  };
+}
+
+/** Logger settings: JSON to stdout with secrets redacted and no query strings. */
+export function loggerOptions(
+  level: string,
+): Exclude<FastifyServerOptions["logger"], boolean | undefined> {
+  return {
+    level,
+    redact: { paths: REDACTED_LOG_PATHS, censor: "[redacted]" },
+    serializers: { req: requestLogFields },
+  };
 }
 
 /**
