@@ -128,28 +128,34 @@ async function applyRefunds(
   return matched;
 }
 
-/** Records what a card dispute's creation or closing says. */
+/**
+ * Records a card dispute's creation or closing, keyed by its Stripe id, so
+ * the two may arrive in either order and the closed status wins.
+ */
 async function applyDispute(services: Services, event: Stripe.Event): Promise<boolean> {
-  if (event.type === "charge.dispute.closed") {
-    return closeCardDispute(services.db, {
-      stripeDisputeId: event.data.object.id,
-      outcome: event.data.object.status,
-      at: services.clock.now(),
-    });
+  if (event.type !== "charge.dispute.created" && event.type !== "charge.dispute.closed") {
+    return false;
   }
-  if (event.type !== "charge.dispute.created") return false;
   const dispute = event.data.object;
   const payment = await paymentOf(services, idOf(dispute.payment_intent), undefined);
   if (payment === undefined) return false;
   const detail = await findBookingDetail(services.db, payment.bookingId);
   if (detail === undefined) return false;
-  services.log.warn({ bookingId: payment.bookingId }, "card dispute raised; needs support");
-  return insertCardDispute(services.db, {
+  const known = {
     bookingId: payment.bookingId,
     driverId: detail.booking.driverId,
     stripeDisputeId: dispute.id,
     reason: dispute.reason,
-  });
+  };
+  if (event.type === "charge.dispute.closed") {
+    return closeCardDispute(services.db, {
+      ...known,
+      outcome: dispute.status,
+      at: services.clock.now(),
+    });
+  }
+  services.log.warn({ bookingId: payment.bookingId }, "card dispute raised; needs support");
+  return insertCardDispute(services.db, known);
 }
 
 /** Applies the events the upfront flow needs; every other type is recorded and ignored. */

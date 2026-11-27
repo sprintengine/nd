@@ -1,5 +1,5 @@
 import { disputes, type Executor } from "@nd/db";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 
 /**
  * Records a dispute raised by a user on a booking, unless they already have
@@ -45,24 +45,37 @@ export async function insertCardDispute(
   return rows.length > 0;
 }
 
-/** Closes a card dispute with Stripe's outcome. Resolves to whether one was open. */
+/**
+ * Records that a card dispute closed with Stripe's outcome, creating it when
+ * the close arrives before the create (a later create then leaves it closed).
+ */
 export async function closeCardDispute(
   db: Executor,
-  input: { stripeDisputeId: string; outcome: string; at: Date },
+  input: {
+    bookingId: string;
+    driverId: string;
+    stripeDisputeId: string;
+    reason: string;
+    outcome: string;
+    at: Date;
+  },
 ): Promise<boolean> {
+  const closed = {
+    status: input.outcome === "won" ? ("rejected" as const) : ("resolved" as const),
+    resolution: `card dispute ${input.outcome}`,
+    resolvedAt: input.at,
+  };
   const rows = await db
-    .update(disputes)
-    .set({
-      status: input.outcome === "won" ? "rejected" : "resolved",
-      resolution: `card dispute ${input.outcome}`,
-      resolvedAt: input.at,
+    .insert(disputes)
+    .values({
+      bookingId: input.bookingId,
+      raisedById: input.driverId,
+      reason: "card_dispute",
+      details: input.reason,
+      stripeDisputeId: input.stripeDisputeId,
+      ...closed,
     })
-    .where(
-      and(
-        eq(disputes.stripeDisputeId, input.stripeDisputeId),
-        inArray(disputes.status, ["open", "under_review"]),
-      ),
-    )
+    .onConflictDoUpdate({ target: disputes.stripeDisputeId, set: closed })
     .returning({ id: disputes.id });
   return rows.length > 0;
 }

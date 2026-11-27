@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createTestDatabase, type TestDatabase } from "../../test/database.ts";
 import { hours, insertBooking, insertListedCharger, tonight } from "../../test/fixtures.ts";
-import { insertDisputeOnce } from "./disputes.ts";
+import { closeCardDispute, insertCardDispute, insertDisputeOnce } from "./disputes.ts";
 
 let database: TestDatabase;
 
@@ -47,5 +47,38 @@ describe("insertDisputeOnce", () => {
       reason: "Overcharged",
       details: null,
     });
+  });
+});
+
+describe("card disputes", () => {
+  it("stay closed when Stripe's close arrives before its create, and close when it comes after", async () => {
+    const { db } = database;
+    const { chargerId } = await insertListedCharger(db, { lat: 53.326, lng: -6.256 });
+    const driverId = `user-${randomUUID()}`;
+    await db.insert(users).values({ id: driverId, name: "Cian", email: `${driverId}@example.com` });
+    const start = tonight();
+    await insertBooking(db, chargerId, driverId, { start, end: hours(start, 2) }, "completed");
+    const [booking] = await db
+      .select({ id: bookings.id })
+      .from(bookings)
+      .where(eq(bookings.driverId, driverId));
+    const known = { bookingId: booking?.id ?? "", driverId, reason: "fraudulent" };
+    const at = new Date("2027-02-01T10:00:00Z");
+    const statusOf = async (stripeDisputeId: string) =>
+      (await db.select().from(disputes).where(eq(disputes.stripeDisputeId, stripeDisputeId)))[0]
+        ?.status;
+
+    // Closed first (won by the platform), then created: it stays closed.
+    await closeCardDispute(db, { ...known, stripeDisputeId: "dp_late", outcome: "won", at });
+    await expect(insertCardDispute(db, { ...known, stripeDisputeId: "dp_late" })).resolves.toBe(
+      false,
+    );
+    expect(await statusOf("dp_late")).toBe("rejected");
+
+    // Created, then closed (lost): resolved.
+    await insertCardDispute(db, { ...known, stripeDisputeId: "dp_usual" });
+    expect(await statusOf("dp_usual")).toBe("open");
+    await closeCardDispute(db, { ...known, stripeDisputeId: "dp_usual", outcome: "lost", at });
+    expect(await statusOf("dp_usual")).toBe("resolved");
   });
 });

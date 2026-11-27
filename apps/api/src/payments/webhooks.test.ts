@@ -276,11 +276,19 @@ describe("POST /webhooks/stripe", () => {
     });
     vi.mocked(disputes.closeCardDispute).mockResolvedValue(true);
     const closed = await post(
-      event("charge.dispute.closed", { id: "dp_1", payment_intent: "pi_1", status: "won" }),
+      event("charge.dispute.closed", {
+        id: "dp_1",
+        payment_intent: "pi_1",
+        reason: "product_not_received",
+        status: "won",
+      }),
     );
     expect(closed.json()).toMatchObject({ outcome: "processed" });
     expect(disputes.closeCardDispute).toHaveBeenCalledWith(expect.anything(), {
+      bookingId: BOOKING_ID,
+      driverId: "user-cian",
       stripeDisputeId: "dp_1",
+      reason: "product_not_received",
       outcome: "won",
       at: expect.any(Date) as unknown,
     });
