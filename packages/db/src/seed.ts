@@ -1,4 +1,9 @@
-import type { BookingStatus } from "@nd/domain";
+import {
+  type BookingStatus,
+  chargeSplit,
+  DEFAULT_CARD_FEE_BPS,
+  DEFAULT_CARD_FEE_FIXED_CENTS,
+} from "@nd/domain";
 import { eq } from "drizzle-orm";
 
 import type { Executor } from "./client.ts";
@@ -11,9 +16,9 @@ import {
   meterValues,
   ocppMessages,
   payments,
+  refunds,
   reviews,
   sessions,
-  transfers,
   users,
 } from "./schema/tables.ts";
 
@@ -35,7 +40,7 @@ export interface SeedData {
   readonly meterValues: Insert<typeof meterValues>[];
   readonly ocppMessages: Insert<typeof ocppMessages>[];
   readonly payments: Insert<typeof payments>[];
-  readonly transfers: Insert<typeof transfers>[];
+  readonly refunds: Insert<typeof refunds>[];
   readonly reviews: Insert<typeof reviews>[];
 }
 
@@ -243,10 +248,7 @@ export function buildSeedData(now: Date = new Date()): SeedData {
       cancelledBy: "driver",
       cancellationReason: "Plans changed",
     },
-    {
-      ...booking("no_show", "donnybrook", userIds.orla, -DAY_MS, 8),
-      cancellationFeeCents: PRICE_PER_HOUR_CENTS.donnybrook,
-    },
+    booking("no_show", "donnybrook", userIds.orla, -DAY_MS, 8),
   ];
 
   const activeSessionId = id("40000000", 1);
@@ -307,75 +309,53 @@ export function buildSeedData(now: Date = new Date()): SeedData {
     },
   ];
 
-  const completedCaptured = quote("ranelagh", 7);
+  // Every booking is paid upfront with a destination charge; the card fee is passed on to the host.
+  const fees = {
+    platformFeeBps: 0,
+    cardFeeBps: DEFAULT_CARD_FEE_BPS,
+    cardFeeFixedCents: DEFAULT_CARD_FEE_FIXED_CENTS,
+  };
+  const charge = (
+    n: number,
+    status: BookingStatus,
+    charger: keyof typeof PRICE_PER_HOUR_CENTS,
+    paymentStatus: "authorised" | "paid",
+  ): Insert<typeof payments> => {
+    const split = chargeSplit(quote(charger, 8), fees);
+    return {
+      id: id("50000000", n),
+      bookingId: bookingIds[status],
+      stripePaymentIntentId: `pi_seed_${status}`,
+      stripeChargeId: paymentStatus === "paid" ? `ch_seed_${status}` : null,
+      amountCents: split.amountCents,
+      platformFeeCents: split.platformFeeCents,
+      cardFeeCents: split.cardFeeCents,
+      status: paymentStatus,
+      captureMethod: paymentStatus === "authorised" ? "manual" : "automatic",
+    };
+  };
   const seedPayments: Insert<typeof payments>[] = [
-    {
-      id: id("50000000", 1),
-      bookingId: bookingIds.requested,
-      status: "pending_authorisation",
-    },
-    {
-      id: id("50000000", 2),
-      bookingId: bookingIds.confirmed,
-      stripePaymentIntentId: "pi_seed_confirmed",
-      authorisedCents: quote("ranelagh", 8),
-      status: "authorised",
-    },
-    {
-      id: id("50000000", 3),
-      bookingId: bookingIds.arrived,
-      stripePaymentIntentId: "pi_seed_arrived",
-      authorisedCents: quote("rathmines", 8),
-      status: "authorised",
-    },
-    {
-      id: id("50000000", 4),
-      bookingId: bookingIds.active,
-      stripePaymentIntentId: "pi_seed_active",
-      authorisedCents: quote("milltown", 8),
-      status: "authorised",
-    },
-    {
-      id: id("50000000", 5),
-      bookingId: bookingIds.completed,
-      stripePaymentIntentId: "pi_seed_completed",
-      authorisedCents: quote("ranelagh", 8),
-      capturedCents: completedCaptured,
-      status: "captured",
-    },
-    {
-      id: id("50000000", 6),
-      bookingId: bookingIds.cancelled,
-      stripeSetupIntentId: "seti_seed_cancelled",
-      authoriseAt: at(2 * DAY_MS),
-      status: "cancelled",
-    },
-    {
-      id: id("50000000", 7),
-      bookingId: bookingIds.no_show,
-      stripePaymentIntentId: "pi_seed_no_show",
-      authorisedCents: quote("donnybrook", 8),
-      capturedCents: PRICE_PER_HOUR_CENTS.donnybrook,
-      status: "captured",
-    },
+    // A request holds the card until the host answers.
+    charge(1, "requested", "milltown", "authorised"),
+    charge(2, "confirmed", "ranelagh", "paid"),
+    charge(3, "arrived", "rathmines", "paid"),
+    charge(4, "active", "milltown", "paid"),
+    charge(5, "completed", "ranelagh", "paid"),
+    charge(6, "cancelled", "donnybrook", "paid"),
+    // A no-show is not refunded.
+    charge(7, "no_show", "donnybrook", "paid"),
   ];
 
-  const seedTransfers: Insert<typeof transfers>[] = [
+  // Sam cancelled three days ahead, well before the cutoff: refunded in full.
+  const seedRefunds: Insert<typeof refunds>[] = [
     {
       id: id("60000000", 1),
-      paymentId: id("50000000", 5),
-      stripeTransferId: "tr_seed_completed",
-      amountCents: completedCaptured,
-      status: "sent",
-      sentAt: at(-DAY_MS),
-    },
-    {
-      // Niamh has not finished her tax details, so her transfer waits.
-      id: id("60000000", 2),
-      paymentId: id("50000000", 7),
-      amountCents: PRICE_PER_HOUR_CENTS.donnybrook,
-      status: "held",
-      holdReason: "tax_details_incomplete",
+      paymentId: id("50000000", 6),
+      amountCents: quote("donnybrook", 8),
+      currency: "EUR",
+      reason: "driver_cancelled",
+      status: "succeeded",
+      stripeRefundId: "re_seed_cancelled",
     },
   ];
 
@@ -407,7 +387,7 @@ export function buildSeedData(now: Date = new Date()): SeedData {
     meterValues: seedMeterValues,
     ocppMessages: seedOcppMessages,
     payments: seedPayments,
-    transfers: seedTransfers,
+    refunds: seedRefunds,
     reviews: seedReviews,
   };
 }
@@ -441,7 +421,7 @@ export async function seed(db: Executor, now: Date = new Date()): Promise<SeedRe
     await tx.insert(meterValues).values(data.meterValues);
     await tx.insert(ocppMessages).values(data.ocppMessages);
     await tx.insert(payments).values(data.payments);
-    await tx.insert(transfers).values(data.transfers);
+    await tx.insert(refunds).values(data.refunds);
     await tx.insert(reviews).values(data.reviews);
     return { inserted: true };
   });

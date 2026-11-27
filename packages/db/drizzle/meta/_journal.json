@@ -71,6 +71,13 @@
       "when": 1795737432481,
       "tag": "0009_host_currency",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795737433481,
+      "tag": "0010_payments_v2",
+      "breakpoints": true
     }
   ]
 }

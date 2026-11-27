@@ -32,10 +32,10 @@ describe("schema", () => {
       "meter_values",
       "ocpp_messages",
       "payments",
+      "refunds",
       "reviews",
       "sessions",
       "stripe_webhook_events",
-      "transfers",
       "users",
     ]);
   });
@@ -49,7 +49,7 @@ describe("schema", () => {
   });
 
   it("keeps sessions, meter values and OCPP messages when their parents go", () => {
-    for (const from of ["sessions", "meter_values", "ocpp_messages", "payments", "transfers"]) {
+    for (const from of ["sessions", "meter_values", "ocpp_messages", "payments", "refunds"]) {
       const keys = foreignKeys.filter((foreignKey) => foreignKey.from === from);
       expect(keys.length).toBeGreaterThan(0);
       for (const key of keys) expect(key.onDelete).toBe("no action");

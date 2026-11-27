@@ -53,6 +53,11 @@ export const hostTaxDetails = pgTable(
     tinMasked: text("tin_masked").notNull(),
     /** Id of the key the encrypted columns were written with. */
     encryptionKeyId: text("encryption_key_id").notNull(),
+    /**
+     * Set when the host's account is deleted: the record is kept, still
+     * encrypted, for platform reporting until then, and purged after.
+     */
+    retainUntil: timestamptz("retain_until"),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
     updatedAt: timestamptz("updated_at")
       .notNull()

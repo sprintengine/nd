@@ -69,11 +69,11 @@ describe("buildSeedData", () => {
 
   it("satisfies the money rules the schema checks", () => {
     for (const payment of data.payments) {
-      expect(payment.capturedCents ?? 0).toBeLessThanOrEqual(payment.authorisedCents ?? 0);
+      const fees = (payment.platformFeeCents ?? 0) + (payment.cardFeeCents ?? 0);
+      expect(fees).toBeLessThanOrEqual(payment.amountCents ?? 0);
+      expect(payment.amountCents).toBeGreaterThan(0);
     }
-    for (const transfer of data.transfers) {
-      expect(transfer.status === "held").toBe(transfer.holdReason !== undefined);
-    }
+    for (const refund of data.refunds) expect(refund.amountCents).toBeGreaterThan(0);
   });
 
   it("uses only placeholder emails", () => {

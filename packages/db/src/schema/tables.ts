@@ -13,6 +13,7 @@ import {
   time,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
@@ -30,10 +31,10 @@ import {
   ocppMessageDirection,
   ocppMessageType,
   paymentStatus,
+  refundReason,
+  refundStatus,
   sessionReviewReason,
   sessionStatus,
-  transferHoldReason,
-  transferStatus,
 } from "./enums.ts";
 
 // Foreign keys use the default ON DELETE NO ACTION unless stated otherwise:
@@ -72,7 +73,7 @@ export const users = pgTable("users", {
   updatedAt: updatedAt(),
 });
 
-/** A user who lists chargers and is paid by transfer to a connected account. */
+/** A user who lists chargers and is paid through destination charges to a connected account. */
 export const hosts = pgTable(
   "hosts",
   {
@@ -85,13 +86,13 @@ export const hosts = pgTable(
     payoutStatus: hostPayoutStatus("payout_status").notNull().default("not_started"),
     /** Currency of the host's payouts account; their listings are priced and charged in it. */
     currency: currency("currency").notNull().default("EUR"),
-    /** Set when `host_tax_details` holds a complete record; transfers are held until then. */
+    /** Set when `host_tax_details` holds a complete record; a listing cannot be published until then. */
     taxDetailsComplete: boolean("tax_details_complete").notNull().default(false),
     /** Optional cheap night-rate window, in the charger's local time. */
     nightRateStart: time("night_rate_start"),
     nightRateEnd: time("night_rate_end"),
     maxSessionsPerDay: smallint("max_sessions_per_day").notNull().default(2),
-    /** Cancelling is free until this many minutes before a booking starts. */
+    /** A driver cancelling until this many minutes before a booking starts is refunded in full. */
     cancellationCutoffMinutes: smallint("cancellation_cutoff_minutes").notNull().default(120),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -198,12 +199,12 @@ export const bookings = pgTable(
     /** Single-use OCPP idTag, generated server-side when the booking is confirmed. */
     idTag: varchar("id_tag", { length: ID_TAG_MAX_LENGTH }).unique(),
     quotedAmountCents: integer("quoted_amount_cents").notNull(),
-    /** Hourly price the quote was made at; billing and fees use it. Set on every booking the API makes. */
+    /** Hourly price the booking was priced at. Set on every booking the API makes. */
     pricePerHourCents: integer("price_per_hour_cents"),
     currency: currency("currency").notNull().default("EUR"),
     kwhCap: numeric("kwh_cap", { precision: 6, scale: 2, mode: "number" }),
     vehiclePlate: text("vehicle_plate"),
-    /** Delayed remote start inside the host's night-rate window (later feature). */
+    /** When a scheduled remote start is sent: the slot start for a driver who plugged in early. */
     scheduledStartAt: timestamptz("scheduled_start_at"),
     /** When the driver said they had arrived ("I'm here"). */
     arrivedAt: timestamptz("arrived_at"),
@@ -212,15 +213,11 @@ export const bookings = pgTable(
      * metres, when they shared a position. Recorded, never enforced.
      */
     arrivalDistanceM: integer("arrival_distance_m"),
-    /**
-     * When the driver plugged in and asked for a scheduled start. Billing runs
-     * from here, because the driver occupies the slot while charging waits.
-     */
+    /** When the driver plugged in and asked for a scheduled start. Waiting is never billed. */
     pluggedInAt: timestamptz("plugged_in_at"),
     cancelledAt: timestamptz("cancelled_at"),
     cancelledBy: cancelledBy("cancelled_by"),
     cancellationReason: text("cancellation_reason"),
-    cancellationFeeCents: integer("cancellation_fee_cents").notNull().default(0),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -238,7 +235,6 @@ export const bookings = pgTable(
     ),
     check("bookings_quoted_amount_non_negative", sql`${table.quotedAmountCents} >= 0`),
     check("bookings_price_per_hour_non_negative", sql`${table.pricePerHourCents} >= 0`),
-    check("bookings_cancellation_fee_non_negative", sql`${table.cancellationFeeCents} >= 0`),
     check("bookings_arrival_distance_non_negative", sql`${table.arrivalDistanceM} >= 0`),
     check(
       "bookings_scheduled_start_in_slot",
@@ -268,12 +264,9 @@ export const sessions = pgTable(
     stoppedAt: timestamptz("stopped_at"),
     stopReason: text("stop_reason"),
     status: sessionStatus("status").notNull().default("starting"),
-    /** Why the session waits for the host or support before it is billed. */
+    /** Why the session's energy figure needs a person to look at it. */
     reviewReason: sessionReviewReason("review_reason"),
-    /** Closed without a StopTransaction: billed once the host confirms or this time passes. */
-    confirmationDueAt: timestamptz("confirmation_due_at"),
-    hostConfirmedAt: timestamptz("host_confirmed_at"),
-    /** When the payment was captured (or released) and the session settled. */
+    /** When the session was closed and its energy recorded for the receipt. */
     reconciledAt: timestamptz("reconciled_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -332,7 +325,11 @@ export const ocppMessages = pgTable(
   ],
 );
 
-/** The driver's payment for a booking (separate charges and transfers). */
+/**
+ * The driver's payment for a booking: one destination charge (paid upfront)
+ * to the host's connected account, its application fee being the platform
+ * fee plus the card fee passed on to the host.
+ */
 export const payments = pgTable(
   "payments",
   {
@@ -342,62 +339,76 @@ export const payments = pgTable(
       .unique()
       .references(() => bookings.id),
     stripePaymentIntentId: text("stripe_payment_intent_id").unique(),
-    stripeSetupIntentId: text("stripe_setup_intent_id").unique(),
-    /** The driver's saved card the authorisation is made with. */
+    /** The driver's saved card the booking is paid with. */
     stripePaymentMethodId: text("stripe_payment_method_id"),
-    /** The charge a capture produced; transfers to the host name it as their source. */
+    /** The charge the PaymentIntent produced. */
     stripeChargeId: text("stripe_charge_id").unique(),
-    /** Why authorising failed (a Stripe decline code), when it did. */
+    /** Why the charge failed (a Stripe decline code), or why its outcome is not known yet. */
     failureReason: text("failure_reason"),
-    /** When the authorisation job should create the PaymentIntent (saved-card path). */
-    authoriseAt: timestamptz("authorise_at"),
-    authorisedCents: integer("authorised_cents").notNull().default(0),
-    capturedCents: integer("captured_cents").notNull().default(0),
+    /** The booking's price: what the driver pays. */
+    amountCents: integer("amount_cents").notNull().default(0),
     platformFeeCents: integer("platform_fee_cents").notNull().default(0),
+    /** The card fee estimate passed on to the host. */
+    cardFeeCents: integer("card_fee_cents").notNull().default(0),
     currency: currency("currency").notNull().default("EUR"),
-    status: paymentStatus("status").notNull().default("pending_authorisation"),
+    status: paymentStatus("status").notNull().default("pending"),
+    /**
+     * `automatic` for an instant booking (charged at once), `manual` for a
+     * request (held until the host answers). Kept so a retried charge sends
+     * Stripe exactly what the first attempt did.
+     */
+    captureMethod: text("capture_method", { enum: ["automatic", "manual"] })
+      .notNull()
+      .default("automatic"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
-    index("payments_status_authorise_at_idx").on(table.status, table.authoriseAt),
+    index("payments_status_idx").on(table.status),
+    check("payments_capture_method", sql`${table.captureMethod} in ('automatic', 'manual')`),
     check(
       "payments_amounts_non_negative",
-      sql`${table.authorisedCents} >= 0 and ${table.capturedCents} >= 0 and ${table.platformFeeCents} >= 0`,
+      sql`${table.amountCents} >= 0 and ${table.platformFeeCents} >= 0 and ${table.cardFeeCents} >= 0`,
     ),
     check(
-      "payments_capture_within_authorisation",
-      sql`${table.capturedCents} <= ${table.authorisedCents}`,
+      "payments_fees_within_amount",
+      sql`${table.platformFeeCents} + ${table.cardFeeCents} <= ${table.amountCents}`,
     ),
-    check("payments_fee_within_capture", sql`${table.platformFeeCents} <= ${table.capturedCents}`),
   ],
 );
 
-/** A transfer of the host's share to their connected account, after capture. */
-export const transfers = pgTable(
-  "transfers",
+/**
+ * A refund of a paid booking, reversing the host's share and the application
+ * fee in proportion. One per payment for each automatic reason; support may
+ * add more. The row is written before Stripe is called, so a refund that
+ * failed half way is retried with the same idempotency key.
+ */
+export const refunds = pgTable(
+  "refunds",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     paymentId: uuid("payment_id")
       .notNull()
       .references(() => payments.id),
-    stripeTransferId: text("stripe_transfer_id").unique(),
     amountCents: integer("amount_cents").notNull(),
-    currency: currency("currency").notNull().default("EUR"),
-    status: transferStatus("status").notNull().default("pending"),
-    holdReason: transferHoldReason("hold_reason"),
-    sentAt: timestamptz("sent_at"),
+    currency: currency("currency").notNull(),
+    reason: refundReason("reason").notNull(),
+    status: refundStatus("status").notNull().default("pending"),
+    stripeRefundId: text("stripe_refund_id").unique(),
+    /** Who issued a support refund, and why. */
+    issuedById: text("issued_by_id").references(() => users.id),
+    note: text("note"),
+    failureReason: text("failure_reason"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
-    unique("transfers_payment_id_unique").on(table.paymentId),
-    index("transfers_status_idx").on(table.status),
-    check("transfers_amount_non_negative", sql`${table.amountCents} >= 0`),
-    check(
-      "transfers_held_has_reason",
-      sql`(${table.status} = 'held') = (${table.holdReason} is not null)`,
-    ),
+    index("refunds_payment_id_idx").on(table.paymentId),
+    index("refunds_status_idx").on(table.status),
+    uniqueIndex("refunds_payment_reason_unique")
+      .on(table.paymentId, table.reason)
+      .where(sql`${table.reason} <> 'support'`),
+    check("refunds_amount_positive", sql`${table.amountCents} > 0`),
   ],
 );
 
@@ -427,7 +438,7 @@ export const reviews = pgTable(
   ],
 );
 
-/** A dispute raised on a booking; holds the host transfer while open. */
+/** A dispute raised on a booking: by its driver or host, or a card dispute from the driver's bank. */
 export const disputes = pgTable(
   "disputes",
   {
@@ -443,6 +454,8 @@ export const disputes = pgTable(
     status: disputeStatus("status").notNull().default("open"),
     resolution: text("resolution"),
     resolvedAt: timestamptz("resolved_at"),
+    /** The card dispute (chargeback) this records, when the driver's bank raised it. */
+    stripeDisputeId: text("stripe_dispute_id").unique(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

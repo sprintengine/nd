@@ -46,7 +46,7 @@ describe("runMigrations", () => {
           "payments",
           "reviews",
           "sessions",
-          "transfers",
+          "refunds",
           "users",
         ]),
       );
