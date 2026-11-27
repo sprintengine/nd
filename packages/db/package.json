@@ -1,0 +1,41 @@
+{
+  "name": "@nd/db",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Drizzle schema, migrations and database access for Postgres with PostGIS.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@nd/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "db:generate": "NODE_OPTIONS=--conditions=@nd/source drizzle-kit generate",
+    "db:migrate": "node --conditions=@nd/source src/main.ts migrate",
+    "db:seed": "node --conditions=@nd/source src/main.ts seed",
+    "lint": "eslint .",
+    "test": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@nd/config": "workspace:*",
+    "@nd/domain": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "pg": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "drizzle-kit": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

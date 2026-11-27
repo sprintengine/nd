@@ -1,0 +1,194 @@
+# Throwaway stack for end-to-end tests, locally and in CI: both apps built
+# from their Dockerfiles, Postgres with PostGIS, and stripe-mock behind a
+# small stateful double (tests/e2e/stripe-double) in place of Stripe.
+# Nothing here is persistent and no value here is a real secret.
+#
+#   infra/e2e-smoke.sh        # build, start, check and tear down
+#   pnpm test:e2e             # the black-box suite in tests/e2e
+#
+# Host ports (loopback only) can be moved with E2E_API_PORT, E2E_GATEWAY_PORT,
+# E2E_STRIPE_PORT and E2E_STRIPE_DOUBLE_PORT, the image tags with
+# E2E_IMAGE_TAG and the project name with COMPOSE_PROJECT_NAME, so several
+# stacks can run side by side.
+name: nd-e2e
+
+x-app: &app
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  depends_on:
+    postgres:
+      condition: service_healthy
+    stripe-double:
+      condition: service_healthy
+
+services:
+  api:
+    <<: *app
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    image: nd-api:${E2E_IMAGE_TAG:-e2e}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      stripe-double:
+        condition: service_healthy
+    environment:
+      # Not production: the end-to-end test hooks below refuse to start there.
+      NODE_ENV: test
+      DATABASE_URL: postgres://nd:nd@postgres:5432/nd
+      # Production-like https URLs (so cookies are Secure); nothing here
+      # resolves them, they only appear in responses and links.
+      PUBLIC_API_URL: https://api.e2e.example.com
+      PUBLIC_APP_URL: https://app.e2e.example.com
+      CORS_ORIGINS: https://app.e2e.example.com
+      # The gateway as published on the host, so a simulator outside the
+      # stack connects with the URL the API hands out.
+      OCPP_WSS_URL: ws://127.0.0.1:${E2E_GATEWAY_PORT:-19000}/v16/
+      AUTH_SECRET: e2e-auth-secret-not-a-real-secret-0000
+      GATEWAY_INTERNAL_URL: http://ocpp-gateway:9100
+      GATEWAY_INTERNAL_SECRET: e2e-internal-secret-not-for-production-use
+      # Stripe is the double, which checks each call with stripe-mock and
+      # keeps state; both accept any sk_test_ key.
+      STRIPE_SECRET_KEY: sk_test_e2e
+      STRIPE_API_BASE_URL: http://stripe-double:12112
+      # Not a real secret: webhooks in this stack are signed with it by the test.
+      STRIPE_WEBHOOK_SECRET: whsec_e2e_not_a_real_secret
+      PLATFORM_FEE_BPS: "0"
+      CARD_FEE_BPS: "150"
+      CARD_FEE_FIXED_CENTS: "25"
+      # The scenarios book many times from one driver.
+      BOOKING_RATE_LIMIT_PER_HOUR: "1000"
+      TAX_RECORD_RETENTION_YEARS: "6"
+      # No real user; the e2e stack has no support staff.
+      ADMIN_USER_IDS: e2e-support-placeholder
+      # No messages leave the stack: the capture senders keep them for
+      # GET /e2e/messages, where the tests read sign-in links and phone codes.
+      # E2E_TEST_HOOKS is refused with NODE_ENV=production.
+      E2E_TEST_HOOKS: "true"
+      EMAIL_PROVIDER: capture
+      SMS_PROVIDER: capture
+      # Many sign-ins from one address in a few seconds; the limiter has its
+      # own tests.
+      AUTH_RATE_LIMIT: "off"
+      # Short enough that a failed start, and a session that never sends
+      # StopTransaction, settle within a test run.
+      SESSION_START_TIMEOUT_SECONDS: "8"
+      STALE_SESSION_GRACE_MINUTES: "1"
+      MIN_BOOKING_MINUTES: "1"
+      ARRIVAL_LEAD_MINUTES: "240"
+      # No push provider either: pushes are dropped (and redacted in the log).
+      ALLOW_CONSOLE_PUSH: "true"
+      # Not a real secret: 32 bytes of ASCII, base64-encoded.
+      TAX_ENCRYPTION_KEYS: e2e:ZTJlLXRheC1rZXktbm90LWEtcmVhbC1zZWNyZXQtMDA=
+    healthcheck:
+      test:
+        - CMD
+        - /nodejs/bin/node
+        - -e
+        - "fetch('http://127.0.0.1:3000/readyz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    ports:
+      - "127.0.0.1:${E2E_API_PORT:-13000}:3000"
+
+  ocpp-gateway:
+    <<: *app
+    build:
+      context: ..
+      dockerfile: apps/ocpp-gateway/Dockerfile
+    image: nd-ocpp-gateway:${E2E_IMAGE_TAG:-e2e}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://nd:nd@postgres:5432/nd
+      # Not a real secret: the internal ChargerControl endpoint's bearer token.
+      GATEWAY_INTERNAL_SECRET: e2e-internal-secret-not-for-production-use
+    healthcheck:
+      test:
+        - CMD
+        - /nodejs/bin/node
+        - -e
+        - "fetch('http://127.0.0.1:9000/readyz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    ports:
+      - "127.0.0.1:${E2E_GATEWAY_PORT:-19000}:9000"
+
+  # Applies the migrations once, before either app starts, the way an
+  # upgrade runs them in production (docs/DEPLOY.md).
+  migrate:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    image: nd-api:${E2E_IMAGE_TAG:-e2e}
+    command: ["dist/migrate.js"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      DATABASE_URL: postgres://nd:nd@postgres:5432/nd
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgis/postgis:17-3.7@sha256:29619efaa36ece13e4e5abf69fe03f49b4f27f64ef01fc4c3f20b4f2228f7418
+    # The image is published for amd64 only; Docker emulates it on arm64 hosts.
+    platform: linux/amd64
+    environment:
+      POSTGRES_USER: nd
+      POSTGRES_PASSWORD: nd
+      POSTGRES_DB: nd
+    # Data lives in memory and is gone after `down`.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      # Over TCP: the image's init-time server listens only on the Unix
+      # socket, then restarts, so a socket check can pass too early.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U nd -d nd"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  # The tests' stateful Stripe (tests/e2e/stripe-double): each call is
+  # checked by stripe-mock, then answered from state kept here. Tests read
+  # what happened on the published port, under /__double/.
+  stripe-double:
+    build:
+      context: ../tests/e2e/stripe-double
+    image: nd-stripe-double:${E2E_IMAGE_TAG:-e2e}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      STRIPE_MOCK_URL: http://stripe-mock:12111
+    depends_on:
+      stripe-mock:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD
+        - /nodejs/bin/node
+        - -e
+        - "fetch('http://127.0.0.1:12112/__double/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    ports:
+      - "127.0.0.1:${E2E_STRIPE_DOUBLE_PORT:-12112}:12112"
+
+  # Stripe's official mock of its API (github.com/stripe/stripe-mock).
+  stripe-mock:
+    image: stripe/stripe-mock:v0.206.0@sha256:aeb96b83e87a893d2ac005e363ac01ffa6e59a5ad85b49c155dfc9129de02e78
+    ports:
+      - "127.0.0.1:${E2E_STRIPE_PORT:-12111}:12111"

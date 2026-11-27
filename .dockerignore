@@ -1,0 +1,26 @@
+# Build context for apps/*/Dockerfile (the repository root). Keep it to what
+# `pnpm install` and `pnpm build` need, so unrelated changes do not bust the
+# layer cache and nothing local or secret is sent to the builder.
+**/node_modules/
+**/dist/
+**/coverage/
+**/.turbo/
+**/.cache/
+**/*.tsbuildinfo
+**/*.log
+**/.DS_Store
+
+.git/
+.github/
+docs/
+infra/
+*.md
+**/Dockerfile
+**/*.dockerignore
+docker-compose*.yml
+compose*.yml
+
+.env
+.env.*
+**/.env
+**/.env.*

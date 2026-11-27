@@ -1,0 +1,40 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "ui": "stream",
+  "tasks": {
+    "transit": {
+      "dependsOn": ["^transit"]
+    },
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "!**/*.test.ts", "!vitest*.config.ts", "!README.md"],
+      "outputs": ["dist/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["transit"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["*"]
+    },
+    "test": {
+      "dependsOn": ["transit"],
+      "outputs": ["coverage/**"]
+    },
+    "test:integration": {
+      "dependsOn": ["transit"],
+      "cache": false,
+      "env": ["DATABASE_URL", "STRIPE_API_BASE_URL"]
+    },
+    "//#typecheck:root": {
+      "inputs": ["*.ts", "tsconfig.json"]
+    },
+    "lint": {
+      "dependsOn": ["transit"]
+    },
+    "//#lint:root": {
+      "inputs": ["*.ts", "*.js", "tsconfig.json"]
+    }
+  }
+}

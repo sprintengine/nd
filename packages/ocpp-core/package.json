@@ -1,0 +1,40 @@
+{
+  "name": "@nd/ocpp-core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OCPP 1.6J message types, framing, validation and RPC, with a Zappi simulator.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@nd/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./sim": {
+      "@nd/source": "./src/sim/index.ts",
+      "types": "./dist/sim/index.d.ts",
+      "default": "./dist/sim/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint .",
+    "sim": "node src/sim/cli.ts",
+    "test": "vitest run --coverage",
+    "typecheck": "tsc"
+  },
+  "devDependencies": {
+    "@nd/config": "workspace:*",
+    "@types/node": "catalog:",
+    "@types/ws": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "dependencies": {
+    "ws": "catalog:",
+    "zod": "catalog:"
+  }
+}

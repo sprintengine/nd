@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Build and tool output
+dist/
+coverage/
+.turbo/
+.cache/
+*.tsbuildinfo
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Logs and OS files
+*.log
+.DS_Store

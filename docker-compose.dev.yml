@@ -1,0 +1,26 @@
+# Local services for development and integration tests: `pnpm db:up`.
+# DATABASE_URL=postgres://nd:nd@localhost:54320/nd
+name: nd-dev
+
+services:
+  postgres:
+    image: postgis/postgis:17-3.7@sha256:29619efaa36ece13e4e5abf69fe03f49b4f27f64ef01fc4c3f20b4f2228f7418
+    # The image is published for amd64 only; Docker emulates it on arm64 hosts.
+    platform: linux/amd64
+    environment:
+      POSTGRES_USER: nd
+      POSTGRES_PASSWORD: nd
+      POSTGRES_DB: nd
+    ports:
+      # Host port 54320 avoids clashing with a Postgres already running on 5432.
+      - "127.0.0.1:54320:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nd -d nd"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-data:

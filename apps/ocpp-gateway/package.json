@@ -1,0 +1,44 @@
+{
+  "name": "@nd/ocpp-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OCPP 1.6J central system that chargers (via the vendor cloud) connect to over WebSocket.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./app": {
+      "@nd/source": "./src/app.ts",
+      "types": "./dist/app.d.ts",
+      "default": "./dist/app.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "node --conditions=@nd/source --watch src/main.ts",
+    "lint": "eslint .",
+    "start": "node dist/main.js",
+    "test": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@nd/config": "workspace:*",
+    "@nd/db": "workspace:*",
+    "@nd/domain": "workspace:*",
+    "@nd/ocpp-core": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "pg": "catalog:",
+    "pino": "catalog:",
+    "ws": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "@types/ws": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

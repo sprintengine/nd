@@ -1,0 +1,1 @@
+ALTER TABLE "hosts" ADD COLUMN "currency" "currency" DEFAULT 'EUR' NOT NULL;

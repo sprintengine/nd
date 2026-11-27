@@ -1,0 +1,23 @@
+{
+  "name": "@nd/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "End-to-end tests: the built images under Docker Compose, driven only through public interfaces.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "lint": "eslint .",
+    "test:e2e": "vitest run",
+    "typecheck": "tsc"
+  },
+  "devDependencies": {
+    "@nd/config": "workspace:*",
+    "@nd/ocpp-core": "workspace:*",
+    "@types/node": "catalog:",
+    "@types/ws": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "ws": "catalog:"
+  }
+}

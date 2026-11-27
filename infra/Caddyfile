@@ -1,0 +1,92 @@
+# Reverse proxy for the reference deployment (infra/compose.yml).
+# See docs/DEPLOY.md for the Cloudflare side.
+#
+#   app.{$DOMAIN}, api.{$DOMAIN}  proxied by Cloudflare  -> api:3000
+#   ocpp.{$DOMAIN}                DNS-only               -> ocpp-gateway:9000
+#
+# TLS:
+# - app. and api. sit behind Cloudflare's proxy with SSL mode "Full (strict)".
+#   Caddy presents a Cloudflare Origin CA certificate for them, mounted from
+#   infra/certs/. Browsers never see it; Cloudflare's edge certificate faces
+#   the public.
+# - ocpp. is DNS-only, so myenergi's cloud connects straight to this VM. Caddy
+#   gets a publicly trusted certificate for it by ACME (Let's Encrypt), using
+#   ports 80 and 443.
+{
+	email {$ACME_EMAIL}
+
+	# The admin API listens inside the container only (used by the healthcheck).
+	admin localhost:2019
+
+	servers {
+		# app. and api. traffic arrives from Cloudflare. Take the client
+		# address from CF-Connecting-IP, but only when the connection comes from
+		# Cloudflare's published ranges (https://www.cloudflare.com/ips/).
+		# Refresh this list if Cloudflare changes it.
+		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+		client_ip_headers CF-Connecting-IP
+
+		# Only the request headers have a deadline (slow-header clients).
+		# There is deliberately no read, write or stream timeout: a charger's
+		# WebSocket stays open for days, and the gateway's 30 s pings keep it
+		# from idling out anywhere on the way. `idle` applies only to
+		# keep-alive HTTP connections between requests, never to an upgraded
+		# WebSocket.
+		timeouts {
+			read_header 10s
+			idle 5m
+		}
+	}
+}
+
+# Cloudflare Origin CA certificate for the proxied hostnames. To accept only
+# connections from Cloudflare (Authenticated Origin Pulls), add inside `tls`:
+#
+#	client_auth {
+#		mode require_and_verify
+#		trust_pool file /etc/caddy/certs/cloudflare-origin-pull-ca.pem
+#	}
+(cloudflare_origin) {
+	tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin-key.pem
+}
+
+# The API also serves the web app (app.), so both hostnames go to it.
+app.{$DOMAIN}, api.{$DOMAIN} {
+	import cloudflare_origin
+	encode zstd gzip
+	reverse_proxy api:3000 {
+		# Replace X-Forwarded-For with the one client address (from
+		# CF-Connecting-IP when the connection is from Cloudflare, see
+		# trusted_proxies). By default Caddy would append Cloudflare's edge
+		# address to it, and the api, trusting one hop, would take that shared
+		# edge address as the client: rate limits would key on Cloudflare.
+		header_up X-Forwarded-For {client_ip}
+	}
+}
+
+ocpp.{$DOMAIN} {
+	# Certificate by ACME (no `tls` directive): this hostname is DNS-only.
+
+	# OCPP 1.6J: wss://ocpp.<domain>/v16/<ChargeboxID>. Caddy proxies the
+	# WebSocket upgrade, including the Basic Auth header, unchanged.
+	handle /v16/* {
+		reverse_proxy ocpp-gateway:9000 {
+			# Send frames as soon as they arrive.
+			flush_interval -1
+			# On a Caddy config reload, keep existing charger sockets open for
+			# up to an hour instead of cutting every charger at once; they
+			# reconnect to the new config when they next drop.
+			stream_close_delay 1h
+		}
+	}
+
+	handle /healthz {
+		reverse_proxy ocpp-gateway:9000
+	}
+
+	# Nothing else on the gateway is public; in particular its internal
+	# command endpoint is reachable only on the Compose network.
+	handle {
+		respond 404
+	}
+}

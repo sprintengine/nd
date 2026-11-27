@@ -1,0 +1,1 @@
+ALTER TYPE "public"."refund_reason" ADD VALUE 'system_cancelled';

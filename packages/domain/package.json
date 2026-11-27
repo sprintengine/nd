@@ -1,0 +1,33 @@
+{
+  "name": "@nd/domain",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Booking and session rules, pricing and the shared Zod contracts.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@nd/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint .",
+    "test": "vitest run --coverage",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@nd/ocpp-core": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@nd/config": "workspace:*",
+    "@types/node": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

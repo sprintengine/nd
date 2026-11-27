@@ -1,0 +1,2 @@
+# Cloudflare Origin CA certificate and key (see docs/DEPLOY.md). Never commit them.
+/certs/

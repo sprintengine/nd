@@ -1,0 +1,47 @@
+{
+  "name": "nd",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Peer-to-peer home EV charger sharing: API, OCPP gateway and shared packages.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "typecheck": "turbo run typecheck typecheck:root",
+    "test": "turbo run test",
+    "test:integration": "turbo run test:integration",
+    "test:e2e": "pnpm --filter @nd/e2e test:e2e",
+    "typecheck:root": "tsc",
+    "db:up": "docker compose -f docker-compose.dev.yml up -d --wait",
+    "db:down": "docker compose -f docker-compose.dev.yml down",
+    "db:migrate": "pnpm --filter @nd/db db:migrate",
+    "db:seed": "pnpm --filter @nd/db db:seed",
+    "lint": "turbo run lint lint:root",
+    "lint:root": "eslint . --ignore-pattern \"apps/**\" --ignore-pattern \"packages/**\"",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "knip": "knip",
+    "lint:packages": "syncpack lint",
+    "commitlint": "commitlint"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "catalog:",
+    "@commitlint/config-conventional": "catalog:",
+    "@nd/config": "workspace:*",
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "knip": "catalog:",
+    "lefthook": "catalog:",
+    "prettier": "catalog:",
+    "syncpack": "catalog:",
+    "turbo": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "packageManager": "pnpm@10.34.9",
+  "engines": {
+    "node": "^26.13.0",
+    "pnpm": "^10.34.0"
+  }
+}

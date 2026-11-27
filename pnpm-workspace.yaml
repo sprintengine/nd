@@ -1,0 +1,73 @@
+packages:
+  - apps/*
+  - packages/*
+  - tests/*
+
+# Every external dependency version lives here, so all workspaces use the same one.
+catalogMode: strict
+catalog:
+  "@commitlint/cli": 21.2.4
+  "@commitlint/config-conventional": 21.2.4
+  "@eslint/js": 10.0.1
+  "@fastify/cors": 11.4.3
+  "@fastify/helmet": 13.2.0
+  "@fastify/rate-limit": 11.3.0
+  "@fastify/swagger": 9.9.5
+  "@fastify/websocket": 11.3.7
+  "@types/node": 26.6.10
+  "@types/pg": 8.23.1
+  "@types/web-push": 3.6.4
+  "@types/ws": 8.18.2
+  "@vitest/coverage-v8": 5.1.2
+  better-auth: 1.7.28
+  drizzle-kit: 0.31.11
+  drizzle-orm: 0.45.4
+  eslint: 10.15.0
+  eslint-config-prettier: 10.1.8
+  eslint-plugin-simple-import-sort: 14.0.0
+  fastify: 5.12.8
+  fastify-type-provider-zod: 7.0.0
+  firebase-admin: 14.5.1
+  globals: 17.14.0
+  knip: 6.48.0
+  lefthook: 2.2.3
+  nodemailer: 10.6.1
+  openapi-types: 12.1.3
+  pg: 8.23.1
+  pg-boss: 12.40.0
+  pino: 10.4.0
+  prettier: 3.10.1
+  stripe: 23.2.0
+  syncpack: 15.3.4
+  turbo: 2.11.13
+  typescript: 7.0.2
+  typescript-eslint: 8.74.0
+  undici: 8.13.1
+  vitest: 5.1.2
+  web-push: 3.6.7
+  ws: 8.23.0
+  zod: 4.6.7
+
+catalogs:
+  # typescript-eslint needs the TypeScript compiler API, which TypeScript 7 does
+  # not ship yet. @nd/config (the only package that loads typescript-eslint)
+  # gets TypeScript 6's API under the name "typescript"; `tsc` everywhere else
+  # is TypeScript 7. Drop this once typescript-eslint supports TypeScript 7.
+  lint:
+    typescript: npm:@typescript/typescript6@6.0.2
+
+engineStrict: true
+
+# Dependencies allowed to run install scripts. lefthook's installs the git
+# hooks; it skips CI and directories that are not git repositories.
+onlyBuiltDependencies:
+  - lefthook
+
+# drizzle-kit (a development tool) asks for esbuild 0.25 and pulls in a
+# deprecated loader that pins esbuild 0.18. Both are old Go builds with known
+# advisories, and drizzle-kit still reaches the api image as one of
+# better-auth's optional peers. Give both the esbuild that vite and tsx use;
+# drizzle-kit's commands are unaffected.
+overrides:
+  "@esbuild-kit/core-utils>esbuild": 0.28.2
+  drizzle-kit>esbuild: 0.28.2
