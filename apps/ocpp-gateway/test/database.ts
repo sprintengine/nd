@@ -8,6 +8,7 @@ import {
   hashChargerSecret,
   hosts,
   ocppMessages,
+  payments,
   runMigrations,
   users,
 } from "@nd/db";
@@ -101,11 +102,15 @@ export function newIdTag(): string {
   return `B${randomBytes(9).toString("hex").toUpperCase()}`.slice(0, 20);
 }
 
-/** A driver's booking on a charger whose slot is open now (from 10 minutes ago, for 2 hours). */
+/**
+ * A driver's booking on a charger whose slot is open now (from 10 minutes
+ * ago, for 2 hours), paid upfront unless `paid` is false.
+ */
 export async function seedOpenBooking(
   db: Database["db"],
   chargerId: string,
   status: "confirmed" | "arrived" | "active" = "arrived",
+  { paid = true }: { paid?: boolean } = {},
 ): Promise<{ id: string; idTag: string }> {
   const driverId = `user-${randomUUID()}`;
   await db.insert(users).values({ id: driverId, name: "Cian", email: `${driverId}@example.com` });
@@ -122,6 +127,9 @@ export async function seedOpenBooking(
       quotedAmountCents: 1000,
     })
     .returning({ id: bookings.id });
+  await db
+    .insert(payments)
+    .values({ bookingId: booking?.id ?? "", amountCents: 1000, status: paid ? "paid" : "pending" });
   return { id: booking?.id ?? "", idTag };
 }
 

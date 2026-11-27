@@ -9,6 +9,7 @@ import {
   meterValues,
   ocppMessages,
   openTransactionForCharger,
+  payments,
   sessions,
 } from "@nd/db";
 import {
@@ -362,6 +363,9 @@ export function createPgStore(db: Db): GatewayStore {
           slotOpen: sql<boolean>`${bookings.slot} @> ${atIso}::timestamptz`,
         })
         .from(bookings)
+        // Only a paid booking's tag unlocks the charger: until its payment has
+        // gone through, the tag reads as unknown.
+        .innerJoin(payments, and(eq(payments.bookingId, bookings.id), eq(payments.status, "paid")))
         .where(and(eq(bookings.chargerId, chargerId), eq(bookings.idTag, idTag)))
         .limit(1);
       const [charger] = await db

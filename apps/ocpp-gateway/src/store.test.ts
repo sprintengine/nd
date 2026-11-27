@@ -222,7 +222,10 @@ describe("status notifications", () => {
 describe("idTag facts", () => {
   it("reads the booking, the host tag and whether a paid booking holds the slot", async () => {
     const { store, queries } = setup([
-      [/from "bookings" where \("bookings"\."charger_id" = \$2/, [[BOOKING, "arrived", true]]],
+      [
+        /from "bookings" inner join "payments" .*"payments"\."status" = \$2/,
+        [[BOOKING, "arrived", true]],
+      ],
       [/^select "host_id_tag"/, [["HOST1"]]],
       [/&&/, [Array.from({ length: Object.keys(getTableColumns(bookings)).length }, () => null)]],
     ]);
@@ -231,7 +234,8 @@ describe("idTag facts", () => {
       hostIdTag: "HOST1",
       paidWindow: true,
     });
-    expect(queries[0]?.params).toEqual([at.toISOString(), CHARGER.id, "TAG", 1]);
+    // Only a paid booking's tag counts.
+    expect(queries[0]?.params).toEqual([at.toISOString(), "paid", CHARGER.id, "TAG", 1]);
   });
 
   it("knows nothing about an unknown tag on an unknown charger", async () => {

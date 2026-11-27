@@ -481,6 +481,16 @@ describe("sessions", () => {
     expect(session).toMatchObject({ status: "stopped", stopReason: "DeAuthorized" });
   });
 
+  it("refuses the tag of a booking that is not paid yet", async () => {
+    const charger = await seedCharger(database.db);
+    const booking = await seedOpenBooking(database.db, charger.id, "arrived", { paid: false });
+    const zappi = await sim(charger);
+    await configured(charger.id);
+    await expect(zappi.enterPin(booking.idTag)).resolves.toEqual({
+      idTagInfo: { status: "Invalid" },
+    });
+  });
+
   it("accepts the host's tag outside paid windows", async () => {
     const charger = await seedCharger(database.db);
     const zappi = await sim(charger);
