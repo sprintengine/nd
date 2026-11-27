@@ -1,6 +1,6 @@
 # 0003. Payments: Stripe Connect Express with separate charges and transfers
 
-- Status: Accepted
+- Status: Superseded by [0005](0005-pay-upfront.md)
 - Date: 2026-11-26
 
 ## Context

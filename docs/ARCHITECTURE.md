@@ -1,6 +1,6 @@
 # Architecture
 
-Peer-to-peer home EV charger sharing. A host lists a home charger, a driver books a slot (usually overnight), and the platform unlocks the charger over OCPP for that booking only, meters the session, charges the driver and pays the host.
+Peer-to-peer home EV charger sharing. A host lists a home charger, a driver books a slot (usually overnight), and the platform unlocks the charger over OCPP for that booking only, meters the session, and takes the driver's payment upfront, straight to the host.
 
 This document describes the back end. The driver and host app is designed separately and will be added to the repository later. Key decisions are recorded in [docs/adr/](adr/).
 
@@ -10,13 +10,13 @@ This document describes the back end. The driver and host app is designed separa
 | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
 | Chargers | myenergi Zappi v2.1 (serial starts with `2`) and Zappi GLO, firmware 5.794 or later, over OCPP 1.6J. Tethered and untethered. No 3-pin sockets. | Other brands, behind per-charger capability flags |
 | Drivers  | Find a charger on a map, book a slot, start and stop from the app, live kWh, receipt, rating                                                    | Recurring bookings, favourites                    |
-| Pricing  | Host sets a price per hour and a kWh cap. Billing is by time used; metered kWh is shown to both sides                                           | Per-kWh billing once metering accuracy is settled |
-| Payments | Stripe Connect Express, separate charges and transfers (section 7)                                                                              | Promotions, fleet invoicing                       |
+| Pricing  | Host sets a price per hour and a kWh cap. The driver pays the booked hours upfront; metered kWh is shown to both sides                          | Per-kWh billing once metering accuracy is settled |
+| Payments | Stripe Connect Express destination charges, paid upfront; card fee passed on to the host (section 7)                                            | Promotions, fleet invoicing                       |
 | Access   | Charger idles locked; each booking gets its own single-use OCPP idTag; the app starts the session remotely                                      | RFID cards                                        |
 | Evidence | Every OCPP message and meter value stored per session                                                                                           | A second evidence source from the vendor's API    |
 | Market   | UK and Ireland                                                                                                                                  |                                                   |
 
-The platform charges no service fee in the first version. The fee is a configuration value (`PLATFORM_FEE_BPS`, default `0`), so it can be introduced without a schema change.
+The platform charges no service fee in the first version. The fee is a configuration value (`PLATFORM_FEE_BPS`, default `0`), so it can be introduced without a schema change. Stripe's card fee is passed on to the host as an estimate (`CARD_FEE_BPS`, default 150, plus `CARD_FEE_FIXED_CENTS`, default 25).
 
 ## 2. System context
 
@@ -43,7 +43,7 @@ flowchart LR
   GW --> DB
   API -->|internal HTTP, shared secret| GW
   GW -.->|LISTEN / NOTIFY| API
-  API -->|PaymentIntents, SetupIntents, transfers| ST
+  API -->|destination charges, SetupIntents, refunds| ST
   ST -->|webhooks| API
   API --> PUSH
   Z <-->|vendor protocol| ME
@@ -94,7 +94,7 @@ erDiagram
   sessions ||--o{ meter_values : records
   chargers ||--o{ ocpp_messages : "audit trail"
   bookings ||--o| payments : "paid by"
-  payments ||--o{ transfers : "settles to"
+  payments ||--o{ refunds : "refunded by"
   bookings ||--o{ reviews : "rated by"
   bookings ||--o{ disputes : "may raise"
 
@@ -161,7 +161,7 @@ erDiagram
     text id_tag "20 chars, unique, single use"
     int quoted_amount_minor
     text currency "GBP | EUR"
-    timestamptz scheduled_start_at "optional delayed start"
+    timestamptz scheduled_start_at "remote start at the slot start, or later"
     text vehicle_plate
   }
   sessions {
@@ -193,28 +193,26 @@ erDiagram
   payments {
     uuid id PK
     uuid booking_id FK
-    text stripe_setup_intent_id
     text stripe_payment_intent_id
-    timestamptz authorise_at
-    int authorised_amount_minor
-    int captured_amount_minor
+    int amount_minor "the booking's price"
     int platform_fee_minor
-    text status
+    int card_fee_minor "passed on to the host"
+    text capture_method "automatic | manual (a request)"
+    text status "pending | authorised | paid | cancelled | failed"
   }
-  transfers {
+  refunds {
     uuid id PK
     uuid payment_id FK
-    text stripe_transfer_id
+    text stripe_refund_id
     int amount_minor
-    text status "held | released | reversed"
-    text hold_reason
-    timestamptz released_at
+    text reason "driver_cancelled | host_cancelled | charger_fault | support"
+    text status "pending | succeeded | failed"
   }
 ```
 
 Rules the schema enforces:
 
-- Money is stored as integers in minor units with an explicit currency. A host's currency follows the country of their payouts account (Ireland: EUR, UK: GBP), chosen at `POST /hosts`; their availability rules, and so the quotes, payments and transfers of bookings on their chargers, use it.
+- Money is stored as integers in minor units with an explicit currency. A host's currency follows the country of their payouts account (Ireland: EUR, UK: GBP), chosen at `POST /hosts`; their availability rules, and so the prices, charges and refunds of bookings on their chargers, use it.
 - `bookings.slot` has an exclusion constraint per charger, so two confirmed or active bookings can never overlap.
 - `bookings.id_tag` is generated server-side from a cryptographic random source, is unique, at most 20 characters (the OCPP limit) and valid only inside its booking window. It is the only credential a driver needs; drivers never learn the host's own tag or PIN.
 - `chargers.location` is `geography(Point, 4326)` with a GiST index; search uses `ST_DWithin` and ranks by distance, then rating. Until a booking is confirmed, search returns the location rounded to about 150 m and never the address.
@@ -232,12 +230,12 @@ The transition functions live in `@nd/domain` as pure, typed reducers. The API a
 stateDiagram-v2
   [*] --> requested
   requested --> confirmed: host approves, or instant book
-  requested --> cancelled: host declines, driver cancels, or payment fails
-  confirmed --> arrived: driver taps "I'm here" (from 15 min before start)
+  requested --> cancelled: host declines, driver cancels, 24 h pass, or payment fails
+  confirmed --> arrived: driver taps "I'm here" (paid, from 4 h before start)
   confirmed --> cancelled: either side cancels (policy applies)
   confirmed --> no_show: slot ends + 15 min with no arrival
   arrived --> active: StartTransaction received
-  arrived --> completed: slot ends + 10 min, a start was tried or the car plugged in; nothing billed
+  arrived --> completed: slot ends + 10 min, a start was tried, the car plugged in or the charger is down; refunded in full
   arrived --> no_show: slot ends + 10 min, never plugged in and no start tried
   active --> completed: StopTransaction received
   completed --> [*]
@@ -245,7 +243,7 @@ stateDiagram-v2
   no_show --> [*]
 ```
 
-Cancellation defaults: free until a host-set cutoff (default 2 hours before the start); after the cutoff, or on a no-show, a fee of one hour is charged. An active booking cannot be cancelled, only stopped.
+Cancellation: a driver cancelling before the host's cutoff (default 2 hours before the start) is refunded in full; after the cutoff, or on a no-show, nothing is refunded. A host cancelling (or declining) always refunds (or releases) everything. An active booking cannot be cancelled, only stopped. Requests the host has not answered expire after 24 hours, or at the slot start if sooner.
 
 ### 5.2 Charger
 
@@ -257,7 +255,7 @@ Cancellation defaults: free until a host-set cutoff (default 2 hours before the 
 stateDiagram-v2
   [*] --> scheduled: delayed start booked
   [*] --> starting: RemoteStartTransaction accepted
-  scheduled --> starting: start job fires inside the night-rate window
+  scheduled --> starting: start job fires at the slot start (or the chosen time)
   starting --> charging: StartTransaction
   starting --> failed: no StartTransaction within 120 s
   charging --> suspended_ev: StatusNotification SuspendedEV
@@ -267,17 +265,16 @@ stateDiagram-v2
   charging --> stopped: StopTransaction
   suspended_ev --> stopped
   suspended_evse --> stopped
-  stopped --> reconciled: meter checked, payment captured
-  stopped --> needs_review: meter mismatch or no authorisation
-  charging --> needs_host_confirmation: no StopTransaction 10 min after the slot
-  needs_host_confirmation --> reconciled: host confirms, or 72 h pass
-  needs_host_confirmation --> needs_review: host disputes
-  needs_review --> reconciled: resolved by support
+  stopped --> reconciled: meter checked, kWh recorded
+  stopped --> needs_review: meter mismatch
+  charging --> reconciled: no StopTransaction 10 min after the slot, closed from the last meter value
+  charging --> needs_review: no StopTransaction and no meter value to close from
+  needs_review --> reconciled: checked by support
 ```
 
 If `StartTransaction` does not arrive within 120 s of an accepted remote start, the gateway sends `TriggerMessage(StatusNotification)` and the app asks the driver to check the cable and try again.
 
-**Scheduled start (design hook).** A host may record a cheap night-rate window. A booking can then carry `scheduled_start_at` inside that window: the driver plugs in on arrival, the charger stays locked, and a job sends the remote start at that time. Zappi does not support OCPP smart-charging profiles in this mode, so the delay is driven from our side. Only the field and the job hook exist in the first version; the user-facing feature comes later.
+**Scheduled start.** Hosts offer only the hours they choose (often their night-rate hours), and the driver books and pays for those hours. A driver may arrive and plug in up to `ARRIVAL_LEAD_MINUTES` (default 4 hours) before the slot: the booking records `scheduled_start_at` (the slot start, or a later `startAt` inside it), the charger stays locked, and a job sends the remote start then. Waiting is never billed. Zappi does not support OCPP smart-charging profiles in this mode, so the delay is driven from our side.
 
 ## 6. Session flow
 
@@ -292,9 +289,9 @@ sequenceDiagram
   participant ST as Stripe
 
   Dr->>API: POST /bookings {chargerId, slot}
-  API->>ST: authorise card or save it (section 7)
+  API->>ST: charge the price (instant) or hold it (request; charged on approval)
   API-->>Dr: booking confirmed, idTag issued
-  Note over Dr,Z: Slot opens, driver arrives and plugs in
+  Note over Dr,Z: Driver arrives and plugs in (up to 4 h early); the start waits for the slot
   Dr->>API: POST /bookings/:id/start
   API->>GW: remoteStart(chargeboxId, idTag)
   GW->>ME: RemoteStartTransaction {idTag, connectorId: 1}
@@ -307,40 +304,46 @@ sequenceDiagram
   loop every 60 s
     ME->>GW: MeterValues
     GW-->>API: NOTIFY session meter
-    API-->>Dr: session:update {kwh, kw, costSoFar, lastSeenAt}
+    API-->>Dr: session:update {kwh, kw, elapsed, lastSeenAt}
   end
   Dr->>API: POST /bookings/:id/stop (or the slot ends)
   API->>GW: remoteStop(transactionId)
   GW->>ME: RemoteStopTransaction
   ME->>GW: StopTransaction {meterStop, reason}
   GW-->>API: NOTIFY session stopped
-  API->>API: reconcile job
-  API->>ST: capture the billed amount
-  API->>ST: transfer to the host when release conditions hold
+  API->>API: reconcile job: check the meter, record kWh
   API-->>Dr: receipt
 ```
 
-If the slot ends while charging, the API sends `RemoteStopTransaction` 5 minutes after the end. If `StopTransaction` never arrives (for example the host's internet drops), a job closes the session from the last meter value 10 minutes after the window ends, marks it `needs_host_confirmation` and emails both sides; payment is captured after the host confirms or 72 hours pass. A host who disputes it instead sends it to support (`needs_review`).
+If the slot ends while charging, the API sends `RemoteStopTransaction` 5 minutes after the end. If `StopTransaction` never arrives (for example the host's internet drops), a job closes the session from the last meter value 10 minutes after the window ends, recording its kWh; without a meter value it goes to support (`needs_review`). Nothing is billed at the end of a session: the booking was paid upfront.
 
 ## 7. Payments
 
-Stripe Connect Express with **separate charges and transfers** ([ADR 0003](adr/0003-payments-flow.md)). The driver's card is charged on the platform account; the host is paid by a transfer to their Express account, linked to the charge with `transfer_group` and `source_transaction`. Stripe handles host identity checks and payouts.
+Stripe Connect Express **destination charges, paid upfront** ([ADR 0005](adr/0005-pay-upfront.md), which supersedes [ADR 0003](adr/0003-payments-flow.md)). Each booking is one PaymentIntent on a saved card, off-session, with `transfer_data.destination` the host's Express account, so the host receives the money with the charge. Stripe handles host identity checks and payouts. A host can take bookings once Stripe reports payouts enabled and their tax details are complete.
 
-**Authorisation.** The quote is the booked hours at the host's hourly price.
+**Price.** The booked hours at the host's hourly price, prorated by the minute. The slot is the charging window: nothing is billed by energy or by the minutes used, and a car that stops drawing power early still pays for the booking. kWh is shown for information.
 
-- Slot starts within 6 days of confirmation: a PaymentIntent with `capture_method: manual` authorises the quote at confirmation. Six days keeps the capture inside the card network's authorisation validity of about 7 days.
-- Slot starts later: a SetupIntent saves the card at confirmation, and a job creates the manual-capture PaymentIntent off-session 24 hours before the start. If that fails, the driver is asked to update the card; if there is still no authorisation 2 hours before the start, the booking is cancelled at no charge.
+**Fees.** `application_fee_amount` = the platform fee (`PLATFORM_FEE_BPS`, default 0) + the card-fee estimate (`CARD_FEE_BPS` of the price, rounded up, + `CARD_FEE_FIXED_CENTS`), never more than the price: Stripe's card fee is passed on to the host, and the platform nets about zero. `chargeSplit` in `@nd/domain` computes it; the host sees the gross, the card fee and their net when setting a price ("you receive €X an hour after card fees"), on receipts and on the dashboard.
 
-**Billing.** `billed = min(ceil(actual minutes / 5) × 5 × price_per_hour / 60, quote)`. Actual minutes run from `StartTransaction` to `StopTransaction`. The kWh cap limits what is delivered, not what is billed. The platform never captures more than it authorised, and never captures before the session has stopped.
+**Charging.**
 
-**Reconciliation**, before capture: the meter delta (`meter_stop_wh − meter_start_wh`) must agree with the last meter value within 0.2 kWh; otherwise the session goes to `needs_review` and nothing is captured.
+- Instant booking: the price is charged when the booking is made (automatic capture). A declined card cancels the booking (402).
+- Request: the price is held on the card (manual capture) when the request is made, charged when the host approves, and released when the host declines, the driver cancels or the request expires (24 hours, or the slot start if sooner). A hold that has lapsed by the time the host approves cancels the booking.
+- A booking cannot be arrived at, started, or unlocked at the charger (the gateway checks the idTag's booking) until its payment is `paid`.
 
-**Transfers are held** until both of these are true:
+**Refunds**, always with `reverse_transfer` and `refund_application_fee`, so the host's share and the fee are reversed in proportion:
 
-1. the session is `reconciled` (not under review or dispute), and
-2. the host's tax details are complete (platform reporting, section 10) and Stripe reports payouts enabled.
+| Case                                                                                                                                                       | Refund                                                               |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Driver cancels before the host's cutoff                                                                                                                    | Full                                                                 |
+| Driver cancels after the cutoff, or no-show                                                                                                                | None                                                                 |
+| Host cancels, or declines a request                                                                                                                        | Full (a request's hold is released)                                  |
+| The charger let the driver down: a start that failed, the car plugged in but never charged, or the charger offline, with no session by the end of the slot | Full, automatically                                                  |
+| Anything else (a session that went partly wrong, a dispute)                                                                                                | Support decides, full or partial (`POST /admin/bookings/:id/refund`) |
 
-The transfer amount is the captured amount minus the platform fee (`PLATFORM_FEE_BPS`, default `0`). Held transfers are retried when a condition changes: saving tax details, Stripe enabling payouts, or a review or dispute being settled (a sweep every minute catches anything missed). Webhooks (`/webhooks/stripe`) are verified by signature and processed idempotently by event id.
+**Doing it safely.** Every change first claims the booking's status (a guarded update; a refund the change owes is recorded in the same transaction), then calls Stripe with one idempotency key per logical action: the booking's charge, its capture, its release, each refund (keyed by the refund row). A call that fails or goes unanswered is recorded on the payment or refund row, and a `resume-payment` job (queued at once, and by the minute sweep) finishes it with the same key, so nothing is charged, captured or refunded twice. The sweep also re-queues lifecycle jobs that went missing (request expiry, no-show).
+
+**Webhooks** (`/webhooks/stripe`) are verified by signature and processed idempotently by event id. They only record what Stripe did and never move money: `payment_intent.succeeded`, `payment_failed` and `canceled` update the payment; `charge.refunded` confirms pending refunds; `charge.dispute.*` records card disputes for support; `account.updated` mirrors the host's payout status.
 
 ## 8. OCPP gateway: Zappi profile
 
@@ -419,14 +422,16 @@ GET    /hosts/chargers/:id/onboarding?wait=N     long-polls for the first BootNo
 PATCH  /hosts/chargers/:id                       pricing, availability, instant book, night-rate window
 POST   /hosts/chargers/:id/stop                  host's emergency stop of the session charging now
 
-POST   /bookings                                 request or instant-confirm
-POST   /bookings/:id/approve | /decline          host
-POST   /bookings/:id/cancel                      either side, policy applied
+POST   /bookings                                 request (price held) or instant-confirm (charged); rate limited
+POST   /bookings/:id/approve | /decline          host: charge the held price, or release it
+POST   /bookings/:id/cancel                      either side; refund rules applied
 POST   /bookings/:id/arrive                      driver, inside the window
 POST   /bookings/:id/start | /stop               remote start and stop
-GET    /bookings/:id/session                     live state, history and receipt
+GET    /bookings/:id/session                     live state
+GET    /bookings/:id/receipt                     price paid, refunds, the session as evidence
 POST   /bookings/:id/review | /dispute           driver: rate the host; dispute a finished booking
 
+POST   /admin/bookings/:id/refund                support: refund in full or in part
 POST   /webhooks/stripe
 ```
 
@@ -440,35 +445,35 @@ Internal admin views (chargers, sessions, OCPP message log) come later, behind t
 
 Messages are JSON text frames with a `type`. Their Zod schemas (`serverMessageSchema`, `clientMessageSchema`, `sessionStateSchema`) live in `@nd/domain` (`realtime.ts`), so the app parses exactly what the API sends.
 
-| `type`           | To                            | Body                                                                                                                                                                                                                                                  |
-| ---------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ready`          | the new connection            | `heartbeatSeconds`                                                                                                                                                                                                                                    |
-| `booking:update` | the booking's driver and host | `bookingId`, `status`, `at`. Fetch `GET /bookings/:id` for the rest                                                                                                                                                                                   |
-| `session:update` | the booking's driver and host | The live session, the same shape as `GET /bookings/:id/session`: `bookingId`, `sessionId`, `status`, `kwh`, `kw`, `elapsed` (seconds), `costSoFar` (cents), `currency`, `lastSeenAt`, `startAt`, `stoppedAt`, `stopReason`, `failure {code, message}` |
-| `charger:status` | the charger's host            | `chargerId`, `status` (onboarding, online, offline, faulted), `connectorStatus` and `errorCode` from the latest StatusNotification, `at`                                                                                                              |
-| `resync`         | everyone                      | The API's database link reconnected and events may have been missed: refetch what is on screen                                                                                                                                                        |
-| `pong`           | the sender                    | The answer to a client's `{"type": "ping"}` (browsers cannot send WebSocket pings). Clients send nothing else                                                                                                                                         |
+| `type`           | To                            | Body                                                                                                                                                                                                                                        |
+| ---------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ready`          | the new connection            | `heartbeatSeconds`                                                                                                                                                                                                                          |
+| `booking:update` | the booking's driver and host | `bookingId`, `status`, `at`. Fetch `GET /bookings/:id` for the rest                                                                                                                                                                         |
+| `session:update` | the booking's driver and host | The live session, the same shape as `GET /bookings/:id/session`: `bookingId`, `sessionId`, `status`, `kwh`, `kw`, `elapsed` (seconds since charging started), `lastSeenAt`, `startAt`, `stoppedAt`, `stopReason`, `failure {code, message}` |
+| `charger:status` | the charger's host            | `chargerId`, `status` (onboarding, online, offline, faulted), `connectorStatus` and `errorCode` from the latest StatusNotification, `at`                                                                                                    |
+| `resync`         | everyone                      | The API's database link reconnected and events may have been missed: refetch what is on screen                                                                                                                                              |
+| `pong`           | the sender                    | The answer to a client's `{"type": "ping"}` (browsers cannot send WebSocket pings). Clients send nothing else                                                                                                                               |
 
 Two sources feed it: the gateway's `charger_events` (session started, meter, status, session stopped, and the charger's connection state), through the API's one `LISTEN` connection, and the API's own changes (arrival, start and stop, failed starts, and the booking routes). Each update re-reads the rows, so a message carries the current state, and nothing is read for a booking or charger no connected user may see.
 
-The live session's `status` is a session status, or `not_started` before the first start, or `scheduled` while a delayed start waits. `costSoFar` is `billedAmount` so far: the time since billing started (StartTransaction, or the plug-in of a scheduled start), rounded up to 5 minutes at the hourly price and capped at the quote. `lastSeenAt` is when the charger last reported on the session; the app shows its age, since the state is always "last known at time T".
+The live session's `status` is a session status, or `not_started` before the first start, or `scheduled` while a delayed start waits. `elapsed` counts seconds since charging started; the booking was paid upfront, so the live state carries no running cost. `lastSeenAt` is when the charger last reported on the session; the app shows its age, since the state is always "last known at time T".
 
 ### 9.2 Session control
 
-- **Arrive** (`POST /bookings/:id/arrive`, the driver, from 15 minutes before the slot until it ends): `confirmed` becomes `arrived`. A position sent with it is compared with the charger's and the distance recorded (more than 300 m is noted, never refused). The window-end stop is scheduled.
-- **Start** (`POST /bookings/:id/start`, an arrived booking inside its slot): a `starting` session is created and `remoteStart(chargeboxId, idTag)` sent. Accepted: a job fails the start if no `StartTransaction` arrives within 120 s, and sends `TriggerMessage(StatusNotification)`. Rejected while the charger reports a transaction open: a soft `Reset`, and one retry by a job 20 s later. Rejected otherwise, offline or no answer: the session is `failed` with a reason and copy the app shows ("The charger didn't respond. Check the cable is plugged in, then try again."), and starting again retries. Starting while a start is pending or a session runs returns it unchanged.
-- **Scheduled start**: `startAt` (inside the slot) records the plug-in and has a job send the remote start at that time; billing runs from the plug-in.
-- **Stop** (`POST /bookings/:id/stop`, the driver) sends `remoteStop(chargeboxId, transactionId)`; a job does the same 5 minutes after the slot ends. The session closes when `StopTransaction` arrives. Stopping is idempotent and takes no payment; capture follows reconciliation.
+- **Arrive** (`POST /bookings/:id/arrive`, the driver of a paid booking, from `ARRIVAL_LEAD_MINUTES` (default 4 hours) before the slot until it ends): `confirmed` becomes `arrived`. A position sent with it is compared with the charger's and the distance recorded (more than 300 m is noted, never refused). The window-end stop is scheduled.
+- **Start** (`POST /bookings/:id/start`, an arrived, paid booking; before the slot it becomes a scheduled start at the slot start): a `starting` session is created and `remoteStart(chargeboxId, idTag)` sent. Accepted: a job fails the start if no `StartTransaction` arrives within 120 s, and sends `TriggerMessage(StatusNotification)`. Rejected while the charger reports a transaction open: a soft `Reset`, and one retry by a job 20 s later. Rejected otherwise, offline or no answer: the session is `failed` with a reason and copy the app shows ("The charger didn't respond. Check the cable is plugged in, then try again."), and starting again retries. Starting while a start is pending or a session runs returns it unchanged.
+- **Scheduled start**: `startAt` (inside the slot), or starting before the slot, records the plug-in and has a job send the remote start at that time; waiting is never billed.
+- **Stop** (`POST /bookings/:id/stop`, the driver) sends `remoteStop(chargeboxId, transactionId)`; a job does the same 5 minutes after the slot ends. The session closes when `StopTransaction` arrives. Stopping is idempotent and changes nothing about what was paid.
 
 ## 10. Security, privacy and compliance hooks
 
 - **Secrets:** per-charger OCPP secrets hashed with argon2; Stripe keys, database credentials and the gateway's shared secret only in the environment; nothing secret in the app bundle.
 - **Input:** every request body, OCPP frame and environment variable is validated with Zod at the boundary.
-- **Abuse:** rate limits on auth, search and booking; a cap on sessions per host per day; an audit log for admin actions.
+- **Abuse:** rate limits on auth, search and booking (`BOOKING_RATE_LIMIT_PER_HOUR` per driver), at most 3 requests waiting per driver, a cap on sessions per host per day (checked under a per-host lock); an audit log for admin actions.
 - **Driver identity:** verified email and phone; vehicle plate per booking (shown to the host); identity verification through Stripe when a host requires it.
 - **Location privacy:** approximate pins and no address until a booking is confirmed.
-- **Platform reporting:** hosts provide legal name, address, date of birth or company number, and a tax identification number with its country before their first transfer. The number and the date of birth are encrypted at rest (AES-256-GCM) with rotatable application keys; the number is validated per country and only ever shown masked. An annual export produces the EU DAC7 report for Irish hosts and the HMRC platform-operator report for UK hosts; neither has a minimum threshold for services.
-- **Retention and deletion:** meter values and OCPP messages are kept for 24 months, then purged; sessions and accounting rows are kept. Deleting an account signs it out everywhere at once and, after a 7-day undo window, anonymises its personal data. The user row stays as a tombstone without personal data, so bookings, payments and transfers keep adding up. Deletion waits until no booking is open and nothing is owed.
+- **Platform reporting:** hosts provide legal name, address, date of birth or company number, and a tax identification number with its country before they can publish a listing. The number and the date of birth are encrypted at rest (AES-256-GCM) with rotatable application keys; the number is validated per country and only ever shown masked. An annual export produces the EU DAC7 report for Irish hosts and the HMRC platform-operator report for UK hosts; neither has a minimum threshold for services.
+- **Retention and deletion:** meter values and OCPP messages are kept for 24 months, then purged; sessions and accounting rows are kept. Deleting an account signs it out everywhere at once and, after a 7-day undo window, anonymises its personal data. The user row stays as a tombstone without personal data, so bookings, payments and refunds keep adding up, and the driver's Stripe Customer (with their saved cards) is deleted. A host who was paid keeps their tax details, still encrypted, for `TAX_RECORD_RETENTION_YEARS` (default 6) for platform reporting; the daily purge job removes them after that. Deletion waits until no booking is open and no payment or refund is still going through.
 - **Regulatory posture:** sharing a private driveway charger by booking falls outside the UK public charge point rules, and keeping access booking-only (no walk-up QR codes) keeps the service clearly private under the EU's alternative fuels infrastructure rules in Ireland. 3-pin sockets are excluded. Both points are to be confirmed by legal review before launch.
 
 ## 11. Hosting
@@ -489,5 +494,5 @@ The deployment target is deliberately open ([ADR 0004](adr/0004-hosting-portabil
 1. Can a Zappi keep an OCPP binding and a myenergi API consent at the same time? This decides whether the vendor's session history can be a second evidence source.
 2. Is the Zappi's internal meter accurate enough to bill per kWh in the UK and Ireland? Until that is answered, billing is by time and kWh is informational.
 3. What terms, pricing and rate limits apply to myenergi's third-party API?
-4. Does holding funds between the charge and a delayed transfer need any regulatory permission beyond what Stripe provides? Legal review is needed before launch.
+4. Destination charges pay the host at the charge, so a later refund can leave a host's Stripe balance negative until later bookings cover it. Is that acceptable, or should payouts be delayed? Legal and Stripe review before launch.
 5. What insurance should hosts have? Launch with a contractual guarantee and the per-host session cap.
