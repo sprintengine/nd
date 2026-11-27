@@ -338,6 +338,13 @@ export const apiEnvSchema = z
             "must not be true in production: it exposes sign-in links and phone codes over HTTP",
         });
       }
+      if (env.STRIPE_API_BASE_URL !== undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["STRIPE_API_BASE_URL"],
+          message: "must not be set in production: payments would go to a test double, not Stripe",
+        });
+      }
       // Fail fast rather than run with sign-in links and codes going nowhere.
       if (env.ALLOW_CONSOLE_MESSAGES !== "true") {
         for (const name of ["EMAIL_PROVIDER", "SMS_PROVIDER"] as const) {

@@ -257,6 +257,16 @@ describe("E2E_TEST_HOOKS", () => {
     );
   });
 
+  it("refuses another Stripe API in production", () => {
+    expect(() =>
+      parseEnv(apiEnvSchema, { ...production, STRIPE_API_BASE_URL: "http://stripe-mock:12111" }),
+    ).toThrow(/must not be set in production[\s\S]*STRIPE_API_BASE_URL/);
+    expect(
+      apiEnvSchema.parse({ ...required, STRIPE_API_BASE_URL: "http://stripe-mock:12111" })
+        .STRIPE_API_BASE_URL,
+    ).toBe("http://stripe-mock:12111");
+  });
+
   it("refuses to start in production with it on", () => {
     expect(() => parseEnv(apiEnvSchema, { ...production, E2E_TEST_HOOKS: "true" })).toThrow(
       /must not be true in production[\s\S]*E2E_TEST_HOOKS/,
