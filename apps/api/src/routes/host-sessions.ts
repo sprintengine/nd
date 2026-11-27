@@ -4,21 +4,43 @@ import { z } from "zod";
 
 import { requireUser, sessionOf } from "../auth/session.ts";
 import { problemResponses } from "../http/problem.ts";
+import { emergencyStop } from "../sessions/control.ts";
+import type { SessionServices } from "../sessions/services.ts";
 import { confirmSession, disputeSession } from "../settlement/confirmation.ts";
-import type { SettlementServices } from "../settlement/services.ts";
 
 const sessionParams = z.object({ id: z.uuid() });
+const chargerParams = z.object({ id: z.uuid() });
 
 const disputeBody = z.object({
   reason: z.string().trim().min(1).max(200),
   details: z.string().trim().min(1).max(2000).optional(),
 });
 
-export function registerHostSessionRoutes(
-  app: FastifyInstance,
-  services: SettlementServices,
-): void {
+export function registerHostSessionRoutes(app: FastifyInstance, services: SessionServices): void {
   const typed = app.withTypeProvider<ZodTypeProvider>();
+
+  typed.post(
+    "/hosts/chargers/:id/stop",
+    {
+      onRequest: requireUser,
+      schema: {
+        summary: "Emergency stop",
+        description:
+          "The host stops the booking session charging on their charger now (RemoteStopTransaction). The session closes, and is billed as usual, when the charger reports the stop. 404 for another host's charger, 409 when nothing is charging or the charger rejects the stop, 503 when it does not answer.",
+        tags: ["hosts"],
+        params: chargerParams,
+        response: {
+          202: z.object({ chargerId: z.uuid(), bookingId: z.uuid() }),
+          ...problemResponses(400, 401, 404, 409, 503),
+        },
+      },
+    },
+    async (request, reply) => {
+      const stopped = await emergencyStop(services, sessionOf(request).userId, request.params.id);
+      void reply.code(202);
+      return { chargerId: request.params.id, bookingId: stopped.bookingId };
+    },
+  );
 
   typed.post(
     "/hosts/sessions/:id/confirm",

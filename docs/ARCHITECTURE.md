@@ -417,6 +417,7 @@ GET    /hosts/me/tax-details | PUT               tax identity for platform repor
 POST   /hosts/chargers                           start onboarding: wss URL, ChargeboxID, secret
 GET    /hosts/chargers/:id/onboarding?wait=N     long-polls for the first BootNotification
 PATCH  /hosts/chargers/:id                       pricing, availability, instant book, night-rate window
+POST   /hosts/chargers/:id/stop                  host's emergency stop of the session charging now
 
 POST   /bookings                                 request or instant-confirm
 POST   /bookings/:id/approve | /decline          host
@@ -424,7 +425,7 @@ POST   /bookings/:id/cancel                      either side, policy applied
 POST   /bookings/:id/arrive                      driver, inside the window
 POST   /bookings/:id/start | /stop               remote start and stop
 GET    /bookings/:id/session                     live state, history and receipt
-POST   /bookings/:id/review | /dispute
+POST   /bookings/:id/review | /dispute           driver: rate the host; dispute a finished booking
 
 POST   /webhooks/stripe
 ```

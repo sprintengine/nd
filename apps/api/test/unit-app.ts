@@ -22,7 +22,7 @@ export const SESSION_COOKIE = { cookie: "better-auth.session_token=abc" };
 /** The app over a database that never connects; tests mock every query. */
 export function startUnitApp(
   config: Partial<ApiConfig> = {},
-  options: Pick<AppDeps, "logger"> = {},
+  options: Partial<Pick<AppDeps, "logger" | "chargerControl">> = {},
 ) {
   const events = fakeChargerEvents();
   const stripe = fakeStripe();
@@ -39,9 +39,9 @@ export function startUnitApp(
     stripe: stripe.stripe,
     payments: payments.payments,
     jobs: jobs.runner,
-    chargerControl: rejectingChargerControl,
     chargerEvents: events.events,
     ...options,
+    chargerControl: options.chargerControl ?? rejectingChargerControl,
   });
   return { app, events, stripe, mail, payments, jobs };
 }

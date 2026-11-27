@@ -23,6 +23,7 @@ const host = {
 
 const owned = {
   id: CHARGER_ID,
+  chargeboxId: "NDABCDEFGHJK",
   status: "online",
   firmware: "5.794",
   maxKw: 7.4,

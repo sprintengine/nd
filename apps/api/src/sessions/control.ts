@@ -1,3 +1,4 @@
+import { openTransactionForCharger } from "@nd/db";
 import {
   ARRIVAL_RADIUS_M,
   arrivalCheck,
@@ -10,6 +11,7 @@ import {
   windowEndStopAt,
 } from "@nd/domain";
 
+import { findOwnedCharger } from "../data/hosts.ts";
 import {
   chargerHasOpenTransaction,
   findSessionContext,
@@ -327,6 +329,15 @@ export async function stopCharging(
     await failStart(services, bookingId, session.id, "stopped_before_start");
     return;
   }
+  await sendRemoteStop(services, charger.chargeboxId, session.ocppTransactionId);
+}
+
+/** Sends RemoteStopTransaction: 503 when the charger does not answer, 409 when it rejects it. */
+async function sendRemoteStop(
+  services: SessionServices,
+  chargeboxId: string,
+  transactionId: number,
+): Promise<void> {
   const unanswered = new HttpProblem(
     503,
     "charger-unreachable",
@@ -335,10 +346,7 @@ export async function stopCharging(
   );
   let result;
   try {
-    result = await services.chargerControl.remoteStop({
-      chargeboxId: charger.chargeboxId,
-      transactionId: session.ocppTransactionId,
-    });
+    result = await services.chargerControl.remoteStop({ chargeboxId, transactionId });
   } catch (error) {
     if (!(error instanceof ChargerControlError)) throw error;
     throw unanswered;
@@ -352,6 +360,33 @@ export async function stopCharging(
       "Unplug the cable to finish; the session closes when the charger reports it.",
     );
   }
+}
+
+/**
+ * The host's emergency stop: the booking session charging on their charger
+ * gets RemoteStopTransaction, as if the driver had stopped it; the gateway
+ * closes it when StopTransaction arrives. 404 unless the user hosts the
+ * charger, 409 when nothing is charging on it. No payment is taken here.
+ */
+export async function emergencyStop(
+  services: SessionServices,
+  hostUserId: string,
+  chargerId: string,
+): Promise<{ bookingId: string; transactionId: number }> {
+  const charger = await findOwnedCharger(services.db, hostUserId, chargerId);
+  if (charger === undefined) throw new HttpProblem(404, "charger-not-found", "No such charger");
+  const open = await openTransactionForCharger(services.db, chargerId);
+  const transactionId = open?.session.ocppTransactionId ?? null;
+  if (open === undefined || transactionId === null) {
+    throw new HttpProblem(409, "nothing-charging", "No booking is charging on this charger");
+  }
+  await sendRemoteStop(services, charger.chargeboxId, transactionId);
+  services.realtime.sessionChanged(open.booking.id);
+  services.log.warn(
+    { chargerId, bookingId: open.booking.id, transactionId },
+    "host made an emergency stop",
+  );
+  return { bookingId: open.booking.id, transactionId };
 }
 
 /**

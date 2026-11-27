@@ -31,6 +31,7 @@ import { createRealtimeHub, DEFAULT_HUB_OPTIONS } from "./realtime/hub.ts";
 import { MAX_CLIENT_FRAME_BYTES, registerRealtimeRoute } from "./realtime/ws.ts";
 import { registerAccountDeletionRoutes } from "./routes/account-deletion.ts";
 import { registerAdminRoutes } from "./routes/admin.ts";
+import { registerBookingDisputeRoutes } from "./routes/booking-disputes.ts";
 import { registerBookingRoutes } from "./routes/bookings.ts";
 import { registerSessionRoutes } from "./routes/bookings-session.ts";
 import { registerChargerRoutes } from "./routes/chargers.ts";
@@ -251,6 +252,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerStripeWebhook(scope, services, config.stripeWebhookSecret);
     registerTaxDetailRoutes(scope, deps);
     registerReceiptRoutes(scope, services);
+    registerBookingDisputeRoutes(scope, services);
     registerHostSessionRoutes(scope, sessionServices);
     registerAdminRoutes(scope, sessionServices, config.adminUserIds);
     if (deps.testHooks !== undefined) registerE2eRoutes(scope, deps.testHooks.messages);

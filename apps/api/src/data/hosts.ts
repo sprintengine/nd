@@ -100,6 +100,7 @@ export async function findOwnedCharger(
   const query = db
     .select({
       id: chargers.id,
+      chargeboxId: chargers.chargeboxId,
       status: chargers.status,
       firmware: chargers.firmware,
       maxKw: chargers.maxKw,
