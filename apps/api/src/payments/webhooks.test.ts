@@ -7,9 +7,13 @@ import { BOOKING_ID, bookingDetail, payment, PAYMENT_ID } from "../../test/booki
 import type { fakePayments, memoryJobs } from "../../test/fakes.ts";
 import { startUnitApp } from "../../test/unit-app.ts";
 import * as data from "../data/bookings.ts";
+import * as disputes from "../data/disputes.ts";
+import * as paymentData from "../data/payments.ts";
 import { payoutStatusOf } from "./webhooks.ts";
 
 vi.mock("../data/bookings.ts");
+vi.mock("../data/disputes.ts");
+vi.mock("../data/payments.ts");
 
 const SECRET = "whsec_test_secret";
 let app: FastifyInstance;
@@ -130,87 +134,125 @@ describe("POST /webhooks/stripe", () => {
       "acct_1",
       "enabled",
     );
-    expect(jobs.sent).toEqual([
-      { name: "release-held-transfers", payload: {}, options: { singletonKey: "all-hosts" } },
-    ]);
-  });
-
-  it("does not retry held transfers while payouts stay off, and survives a queue failure", async () => {
-    vi.mocked(data.setPayoutStatusByAccount).mockResolvedValue(true);
-    await post(event("account.updated", { id: "acct_1", payouts_enabled: false }));
+    // A webhook never moves money or queues anything that would.
     expect(jobs.sent).toEqual([]);
-    vi.spyOn(jobs.runner, "send").mockRejectedValueOnce(new Error("queue down"));
-    const response = await post({
-      ...event("account.updated", { id: "acct_1", payouts_enabled: true, charges_enabled: true }),
-      id: "evt_again",
-    });
-    expect(response.json()).toEqual({ received: true, outcome: "processed" });
   });
 
   it.each([
     [
-      "payment_intent.amount_capturable_updated",
-      { amount_capturable: 1000 },
-      ["pending_authorisation", "card_saved"],
+      "payment_intent.succeeded",
+      { latest_charge: "ch_1" },
       {
-        status: "authorised",
+        status: "paid",
         stripePaymentIntentId: "pi_1",
-        authorisedCents: 1000,
+        stripeChargeId: "ch_1",
         failureReason: null,
       },
     ],
-    [
-      "payment_intent.succeeded",
-      { amount_received: 400, latest_charge: "ch_1" },
-      ["authorised"],
-      { status: "captured", capturedCents: 400, stripeChargeId: "ch_1" },
-    ],
-    [
-      "payment_intent.canceled",
-      {},
-      ["pending_authorisation", "card_saved", "authorised"],
-      { status: "cancelled" },
-    ],
+    ["payment_intent.canceled", {}, { status: "cancelled", stripePaymentIntentId: "pi_1" }],
     [
       "payment_intent.payment_failed",
       { last_payment_error: { decline_code: "insufficient_funds" } },
-      ["pending_authorisation", "card_saved"],
-      { failureReason: "insufficient_funds" },
+      { stripePaymentIntentId: "pi_1", failureReason: "insufficient_funds" },
     ],
     [
       "payment_intent.payment_failed",
       { last_payment_error: { code: "expired_card" } },
-      ["pending_authorisation", "card_saved"],
-      { failureReason: "expired_card" },
+      { stripePaymentIntentId: "pi_1", failureReason: "expired_card" },
     ],
     [
       "payment_intent.payment_failed",
       { last_payment_error: null },
-      ["pending_authorisation", "card_saved"],
-      { failureReason: "payment_failed" },
+      { stripePaymentIntentId: "pi_1", failureReason: "payment_failed" },
     ],
-  ])("applies %s to the payment", async (type, fields, from, change) => {
+  ])("records %s on the payment", async (type, fields, change) => {
     const response = await post(event(type, { id: "pi_1", metadata: {}, ...fields }));
     expect(response.json()).toMatchObject({ outcome: "processed" });
     expect(data.updatePaymentFrom).toHaveBeenCalledWith(
       expect.anything(),
       PAYMENT_ID,
-      from,
+      ["pending", "authorised"],
       change,
     );
+    expect(payments.calls).toEqual([]);
+  });
+
+  it("confirms the pending refunds of a refunded charge", async () => {
+    vi.mocked(paymentData.confirmPendingRefunds).mockResolvedValue(1);
+    const response = await post(event("charge.refunded", { id: "ch_1", payment_intent: "pi_1" }));
+    expect(response.json()).toMatchObject({ outcome: "processed" });
+    expect(paymentData.confirmPendingRefunds).toHaveBeenCalledWith(expect.anything(), PAYMENT_ID);
+    vi.mocked(paymentData.confirmPendingRefunds).mockResolvedValue(0);
+    const nothing = await post({
+      ...event("charge.refunded", { id: "ch_1", payment_intent: { id: "pi_1" } }),
+      id: "evt_again",
+    });
+    expect(nothing.json()).toMatchObject({ outcome: "ignored" });
+    vi.mocked(data.findPaymentByIntent).mockResolvedValue(undefined);
+    const unknown = await post({
+      ...event("charge.refunded", { id: "ch_2", payment_intent: null }),
+      id: "evt_unknown",
+    });
+    expect(unknown.json()).toMatchObject({ outcome: "ignored" });
+  });
+
+  it("records a card dispute for support, and its outcome", async () => {
+    vi.mocked(data.findBookingDetail).mockResolvedValue(bookingDetail("user-cian"));
+    vi.mocked(disputes.insertCardDispute).mockResolvedValue(true);
+    const created = await post(
+      event("charge.dispute.created", {
+        id: "dp_1",
+        payment_intent: "pi_1",
+        reason: "product_not_received",
+        status: "needs_response",
+      }),
+    );
+    expect(created.json()).toMatchObject({ outcome: "processed" });
+    expect(disputes.insertCardDispute).toHaveBeenCalledWith(expect.anything(), {
+      bookingId: BOOKING_ID,
+      driverId: "user-cian",
+      stripeDisputeId: "dp_1",
+      reason: "product_not_received",
+    });
+    vi.mocked(disputes.closeCardDispute).mockResolvedValue(true);
+    const closed = await post(
+      event("charge.dispute.closed", { id: "dp_1", payment_intent: "pi_1", status: "won" }),
+    );
+    expect(closed.json()).toMatchObject({ outcome: "processed" });
+    expect(disputes.closeCardDispute).toHaveBeenCalledWith(expect.anything(), {
+      stripeDisputeId: "dp_1",
+      outcome: "won",
+      at: expect.any(Date) as unknown,
+    });
+    expect(payments.calls).toEqual([]);
+  });
+
+  it("ignores a card dispute on a payment or booking it does not know", async () => {
+    vi.mocked(data.findBookingDetail).mockResolvedValue(undefined);
+    const noBooking = await post(
+      event("charge.dispute.created", { id: "dp_2", payment_intent: "pi_1", reason: "fraudulent" }),
+    );
+    expect(noBooking.json()).toMatchObject({ outcome: "ignored" });
+    vi.mocked(data.findPaymentByIntent).mockResolvedValue(undefined);
+    const noPayment = await post({
+      ...event("charge.dispute.created", { id: "dp_3", payment_intent: "pi_x", reason: "x" }),
+      id: "evt_x",
+    });
+    expect(noPayment.json()).toMatchObject({ outcome: "ignored" });
+    expect(disputes.insertCardDispute).not.toHaveBeenCalled();
   });
 
   it("finds a payment by its booking before the intent id is stored", async () => {
     vi.mocked(data.findPaymentByIntent).mockResolvedValue(undefined);
     vi.mocked(data.findBookingDetail).mockResolvedValue(
       bookingDetail("user-cian", {
-        payment: { stripePaymentIntentId: null, status: "pending_authorisation" },
+        payment: { stripePaymentIntentId: null, status: "pending" },
       }),
     );
     const response = await post(
-      event("payment_intent.amount_capturable_updated", {
+      event("payment_intent.succeeded", {
         id: "pi_new",
-        amount_capturable: 1000,
+        latest_charge: { id: "ch_new" },
         metadata: { bookingId: BOOKING_ID },
       }),
     );

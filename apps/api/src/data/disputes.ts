@@ -1,5 +1,5 @@
 import { disputes, type Executor } from "@nd/db";
-import { sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 /**
  * Records a dispute raised by a user on a booking, unless they already have
@@ -21,4 +21,48 @@ export async function insertDisputeOnce(
     returning id
   `);
   return result.rows[0]?.id;
+}
+
+/**
+ * Records a card dispute (chargeback) the driver's bank raised on a booking,
+ * once per Stripe dispute. Resolves to whether it was new.
+ */
+export async function insertCardDispute(
+  db: Executor,
+  input: { bookingId: string; driverId: string; stripeDisputeId: string; reason: string },
+): Promise<boolean> {
+  const rows = await db
+    .insert(disputes)
+    .values({
+      bookingId: input.bookingId,
+      raisedById: input.driverId,
+      reason: "card_dispute",
+      details: input.reason,
+      stripeDisputeId: input.stripeDisputeId,
+    })
+    .onConflictDoNothing({ target: disputes.stripeDisputeId })
+    .returning({ id: disputes.id });
+  return rows.length > 0;
+}
+
+/** Closes a card dispute with Stripe's outcome. Resolves to whether one was open. */
+export async function closeCardDispute(
+  db: Executor,
+  input: { stripeDisputeId: string; outcome: string; at: Date },
+): Promise<boolean> {
+  const rows = await db
+    .update(disputes)
+    .set({
+      status: input.outcome === "won" ? "rejected" : "resolved",
+      resolution: `card dispute ${input.outcome}`,
+      resolvedAt: input.at,
+    })
+    .where(
+      and(
+        eq(disputes.stripeDisputeId, input.stripeDisputeId),
+        inArray(disputes.status, ["open", "under_review"]),
+      ),
+    )
+    .returning({ id: disputes.id });
+  return rows.length > 0;
 }

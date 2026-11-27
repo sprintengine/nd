@@ -1,20 +1,31 @@
+import { refundReasonSchema, refundStatusSchema } from "@nd/domain";
 import type { FastifyInstance, onRequestAsyncHookHandler } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 
+import { sessionOf } from "../auth/session.ts";
+import { findBookingDetail } from "../data/bookings.ts";
 import { HttpProblem, problemResponses } from "../http/problem.ts";
-import { resolveSession } from "../settlement/resolve.ts";
-import type { SettlementServices } from "../settlement/services.ts";
+import { refundPayment } from "../payments/charges.ts";
+import type { Services } from "../services.ts";
 
-const sessionParams = z.object({ id: z.uuid() });
+const bookingParams = z.object({ id: z.uuid() });
 
-const resolveBody = z.object({
+const refundBody = z.object({
   amountCents: z
     .number()
     .int()
-    .min(0)
-    .describe("What the driver pays; at most what was authorised. 0 releases the authorisation"),
-  note: z.string().trim().min(1).max(1000).optional().describe("Recorded on any open dispute"),
+    .min(1)
+    .optional()
+    .describe("What to refund; the rest of what was paid when omitted (a full refund)"),
+  note: z.string().trim().min(1).max(1000).describe("Why, for the record"),
+});
+
+const refundResponse = z.object({
+  bookingId: z.uuid(),
+  amountCents: z.number().int(),
+  reason: refundReasonSchema,
+  status: refundStatusSchema,
 });
 
 /** Route guard: 401 without a session, 403 unless the user is on the admin list. */
@@ -32,36 +43,62 @@ function requireAdmin(adminUserIds: readonly string[]): onRequestAsyncHookHandle
 
 export function registerAdminRoutes(
   scope: FastifyInstance,
-  services: SettlementServices,
+  services: Services,
   adminUserIds: readonly string[],
 ): void {
   const typed = scope.withTypeProvider<ZodTypeProvider>();
 
   typed.post(
-    "/admin/sessions/:id/resolve",
+    "/admin/bookings/:id/refund",
     {
       onRequest: requireAdmin(adminUserIds),
       schema: {
-        summary: "Resolve a session that needs review",
+        summary: "Refund a booking",
         description:
-          "Support decides what the driver pays for a session in review (meter mismatch, missing stop, dispute): the amount is captured, open disputes on the booking are resolved, and the host's transfer is sent or held. Admins only (ADMIN_USER_IDS).",
+          "Support refunds a paid booking in full or in part, for anything the automatic rules do not cover (a session that went partly wrong, a dispute). The host's share and the application fee are reversed in proportion. Never more than what is left to refund (422). Admins only (ADMIN_USER_IDS).",
         tags: ["admin"],
-        params: sessionParams,
-        body: resolveBody,
-        response: {
-          200: z.object({ sessionId: z.uuid(), amountCents: z.number().int() }),
-          ...problemResponses(400, 401, 403, 404, 409, 422, 502),
-        },
+        params: bookingParams,
+        body: refundBody,
+        response: { 201: refundResponse, ...problemResponses(400, 401, 403, 404, 409, 422) },
       },
     },
-    async (request) => {
-      await resolveSession(
-        services,
-        request.params.id,
-        request.body.amountCents,
-        request.body.note ?? "Resolved by support",
+    async (request, reply) => {
+      const bookingId = request.params.id;
+      const detail = await findBookingDetail(services.db, bookingId);
+      if (detail === undefined) {
+        throw new HttpProblem(404, "booking-not-found", "No such booking");
+      }
+      const payment = detail.payment;
+      if (payment?.status !== "paid") {
+        throw new HttpProblem(409, "not-paid", "This booking has not been paid");
+      }
+      const refund = await refundPayment(services, payment, {
+        amountCents: request.body.amountCents ?? payment.amountCents,
+        reason: "support",
+        issuedById: sessionOf(request).userId,
+        note: request.body.note,
+      });
+      if (refund === undefined) {
+        throw new HttpProblem(
+          422,
+          "refund-too-large",
+          "That is more than is left to refund",
+          request.body.amountCents === undefined
+            ? "Part of this booking has been refunded already; give the amount left."
+            : undefined,
+        );
+      }
+      services.log.info(
+        { bookingId, amountCents: refund.amountCents, status: refund.status },
+        "booking refunded by support",
       );
-      return { sessionId: request.params.id, amountCents: request.body.amountCents };
+      void reply.code(201);
+      return {
+        bookingId,
+        amountCents: refund.amountCents,
+        reason: refund.reason,
+        status: refund.status,
+      };
     },
   );
 }
