@@ -19,7 +19,7 @@ import type {
   TransferHoldReason,
   TransferStatus,
 } from "@nd/domain";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 
 import { isSlotTaken } from "../bookings/rules.ts";
 
@@ -195,9 +195,9 @@ export function insertBookingWithPayment(
     });
 }
 
-/** A booking with its charger, host, driver and payment: everything its rules need. */
-export async function findBookingDetail(db: Executor, bookingId: string) {
-  const [row] = await db
+/** Bookings with their charger, host, driver and payment, matching `where`. */
+function bookingDetailQuery(db: Executor, where: SQL | undefined) {
+  return db
     .select({
       booking: bookings,
       charger: {
@@ -222,8 +222,12 @@ export async function findBookingDetail(db: Executor, bookingId: string) {
     .innerJoin(hosts, eq(hosts.id, chargers.hostId))
     .innerJoin(users, eq(users.id, bookings.driverId))
     .leftJoin(payments, eq(payments.bookingId, bookings.id))
-    .where(eq(bookings.id, bookingId))
-    .limit(1);
+    .where(where);
+}
+
+/** A booking with its charger, host, driver and payment: everything its rules need. */
+export async function findBookingDetail(db: Executor, bookingId: string) {
+  const [row] = await bookingDetailQuery(db, eq(bookings.id, bookingId)).limit(1);
   return row;
 }
 
@@ -285,8 +289,10 @@ export async function findBookingDetails(
   db: Executor,
   ids: readonly string[],
 ): Promise<BookingDetail[]> {
-  const found = await Promise.all(ids.map((id) => findBookingDetail(db, id)));
-  return found.filter((row) => row !== undefined);
+  if (ids.length === 0) return [];
+  const rows = await bookingDetailQuery(db, inArray(bookings.id, [...ids]));
+  const byId = new Map(rows.map((row) => [row.booking.id, row]));
+  return ids.flatMap((id) => byId.get(id) ?? []);
 }
 
 export interface BookingChange {
