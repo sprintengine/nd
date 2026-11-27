@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { scriptedDb } from "../../test/fake-db.ts";
+import { fakePayments } from "../../test/fakes.ts";
 import {
   cancelDeletion,
   DELETION_UNDO_DAYS,
@@ -19,18 +20,27 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const found = [["row-1"]];
 
 describe("deletionBlockers", () => {
-  it("reports open bookings as driver and host, and unpaid payments", async () => {
+  it("reports open bookings as driver and host, and money still moving", async () => {
     const { db, queries } = scriptedDb([found, found, found]);
     const blockers = await deletionBlockers(db, "user-1");
     expect(blockers.map((blocker) => blocker.code)).toEqual([
       "open-booking",
       "host-open-booking",
-      "unpaid-balance",
+      "payment-in-flight",
     ]);
     expect(queries[0]?.params).toEqual(["user-1", "completed", "cancelled", "no_show", 1]);
+    expect(queries[2]?.params).toEqual(["user-1", "pending", "authorised", 1]);
   });
 
-  it("is empty when nothing is open or owed", async () => {
+  it("reports a refund in flight", async () => {
+    const { db, queries } = scriptedDb([[], [], [], [{ found: true }]]);
+    await expect(deletionBlockers(db, "user-1")).resolves.toEqual([
+      expect.objectContaining({ code: "payment-in-flight" }),
+    ]);
+    expect(queries[3]?.text).toContain("r.status = 'pending'");
+  });
+
+  it("is empty when nothing is open or moving", async () => {
     await expect(deletionBlockers(scriptedDb().db, "user-1")).resolves.toEqual([]);
   });
 });
@@ -49,6 +59,7 @@ describe("requestDeletion", () => {
     const { db, queries } = scriptedDb([
       [["user-1"]], // lock the user
       [], // no pending request
+      [],
       [],
       [],
       [], // no blockers
@@ -77,7 +88,7 @@ describe("requestDeletion", () => {
   });
 
   it("returns the blockers instead of scheduling", async () => {
-    const { db, queries } = scriptedDb([[["user-1"]], [], found, [], []]);
+    const { db, queries } = scriptedDb([[["user-1"]], [], found, [], [], []]);
     const result = await requestDeletion(db, input);
     expect(result).toEqual({
       status: "blocked",
@@ -87,7 +98,7 @@ describe("requestDeletion", () => {
   });
 
   it("fails loudly if the request is not stored", async () => {
-    const { db } = scriptedDb([[["user-1"]], [], [], [], [], [], []]);
+    const { db } = scriptedDb([[["user-1"]], [], [], [], [], [], [], []]);
     await expect(requestDeletion(db, input)).rejects.toThrow(/not stored/);
   });
 });
@@ -129,14 +140,20 @@ describe("revokeSessions", () => {
 });
 
 describe("processDueDeletions", () => {
-  it("anonymises a due host account in one transaction", async () => {
+  const options = () => {
+    const payments = fakePayments();
+    return { payments, options: { payments: payments.payments, taxRecordRetentionYears: 6 } };
+  };
+
+  it("anonymises a due host account in one transaction, deleting the Stripe Customer", async () => {
     const { db, queries } = scriptedDb([
       [["deletion-1"]], // due
       [["user-1"]], // locked
       [],
       [],
+      [],
       [], // no blockers
-      [["aoife@example.com", "+353861234567"]],
+      [["aoife@example.com", "+353861234567", "cus_1"]],
       [],
       [],
       [],
@@ -145,8 +162,17 @@ describe("processDueDeletions", () => {
       [],
       [],
       [["host-1"]],
+      [], // never paid: no reportable earnings
     ]);
-    await expect(processDueDeletions(db, NOW)).resolves.toEqual({ completed: 1, skipped: [] });
+    const { payments, options: run } = options();
+    await expect(processDueDeletions(db, NOW, run)).resolves.toEqual({
+      completed: 1,
+      skipped: [],
+      failed: 0,
+    });
+    expect(payments.callsTo("deleteCustomer")).toEqual([
+      { method: "deleteCustomer", input: "cus_1" },
+    ]);
     const texts = queries.map((query) => query.text);
     expect(texts.find((text) => text.startsWith('update "users"'))).toContain('"deleted_at"');
     expect(texts.some((text) => text.includes('delete from "host_tax_details"'))).toBe(true);
@@ -160,6 +186,36 @@ describe("processDueDeletions", () => {
     ]);
   });
 
+  it("keeps a paid host's tax details, encrypted, for the retention period", async () => {
+    const { db, queries } = scriptedDb([
+      [["deletion-1"]],
+      [["user-1"]],
+      [],
+      [],
+      [],
+      [],
+      [["aoife@example.com", null, null]],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [["host-1"]],
+      [["payment-1"]], // paid: reportable earnings
+    ]);
+    const { payments, options: run } = options();
+    await expect(processDueDeletions(db, NOW, run)).resolves.toMatchObject({ completed: 1 });
+    expect(payments.calls).toEqual([]);
+    const keep = queries.find((query) => query.text.startsWith('update "host_tax_details"'));
+    expect(keep?.text).toContain('"retain_until"');
+    expect(keep?.params).toContain(new Date("2033-01-11T12:00:00Z").toISOString());
+    expect(queries.some((query) => query.text.includes('delete from "host_tax_details"'))).toBe(
+      false,
+    );
+  });
+
   it("anonymises a driver without a phone or host profile", async () => {
     const { db, queries } = scriptedDb([
       [["deletion-1"]],
@@ -167,25 +223,59 @@ describe("processDueDeletions", () => {
       [],
       [],
       [],
-      [["aoife@example.com", null]],
+      [],
+      [["aoife@example.com", null, null]],
     ]);
-    await expect(processDueDeletions(db, NOW)).resolves.toMatchObject({ completed: 1 });
+    await expect(processDueDeletions(db, NOW, options().options)).resolves.toMatchObject({
+      completed: 1,
+    });
     expect(queries.some((query) => query.text.includes("host_tax_details"))).toBe(false);
   });
 
+  it("leaves the request for the next run when the Stripe Customer cannot be deleted", async () => {
+    const { db, queries } = scriptedDb([
+      [["deletion-1"]],
+      [["user-1"]],
+      [],
+      [],
+      [],
+      [],
+      [["aoife@example.com", null, "cus_1"]],
+    ]);
+    const { payments, options: run } = options();
+    payments.state.deleteCustomer = "error";
+    await expect(processDueDeletions(db, NOW, run)).resolves.toEqual({
+      completed: 0,
+      skipped: [],
+      failed: 1,
+    });
+    expect(queries.some((query) => query.text.startsWith('update "users"'))).toBe(false);
+  });
+
   it("skips a request that is now blocked, or taken by another run", async () => {
-    const blocked = scriptedDb([[["deletion-1"], ["deletion-2"]], [["user-1"]], found, [], [], []]);
-    await expect(processDueDeletions(blocked.db, NOW)).resolves.toEqual({
+    const blocked = scriptedDb([
+      [["deletion-1"], ["deletion-2"]],
+      [["user-1"]],
+      found,
+      [],
+      [],
+      [],
+      [],
+    ]);
+    await expect(processDueDeletions(blocked.db, NOW, options().options)).resolves.toEqual({
       completed: 0,
       skipped: [
         { userId: "user-1", blockers: [expect.objectContaining({ code: "open-booking" })] },
       ],
+      failed: 0,
     });
     expect(blocked.queries.some((query) => query.text.startsWith('update "users"'))).toBe(false);
   });
 
   it("does nothing for a user row that is already gone", async () => {
-    const { db } = scriptedDb([[["deletion-1"]], [["user-1"]], [], [], [], []]);
-    await expect(processDueDeletions(db, NOW)).resolves.toMatchObject({ completed: 1 });
+    const { db } = scriptedDb([[["deletion-1"]], [["user-1"]], [], [], [], [], []]);
+    await expect(processDueDeletions(db, NOW, options().options)).resolves.toMatchObject({
+      completed: 1,
+    });
   });
 });

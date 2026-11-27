@@ -4,5 +4,9 @@
 // key is put first (docs/RUNBOOK.md).
 
 export { type DeletionRun, processDueDeletions } from "./accounts/deletion.ts";
-export { purgeExpiredTelemetry, type TelemetryPurge } from "./compliance/retention.ts";
+export {
+  purgeExpiredTaxRecords,
+  purgeExpiredTelemetry,
+  type TelemetryPurge,
+} from "./compliance/retention.ts";
 export { rotateTaxEncryptionKeys } from "./data/tax-details.ts";

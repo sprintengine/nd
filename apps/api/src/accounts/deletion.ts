@@ -17,13 +17,18 @@ import {
   users,
 } from "@nd/db";
 import { TERMINAL_BOOKING_STATUSES } from "@nd/domain";
-import { and, asc, eq, gt, inArray, isNull, lte, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lte, notInArray, or, sql } from "drizzle-orm";
+
+import { hasRefundInFlight } from "../data/payments.ts";
+import type { StripePayments } from "../stripe/payments.ts";
 
 // Account deletion (GDPR erasure). A request takes effect after an undo
 // window: the user is signed out everywhere at once, and `processDueDeletions`
 // anonymises the account once the window has passed. Bookings, sessions,
-// payments and transfers are kept for accounting; they keep pointing at the
-// user's row, which becomes a tombstone with no personal data in it.
+// payments and refunds are kept for accounting; they keep pointing at the
+// user's row, which becomes a tombstone with no personal data in it. The
+// driver's Stripe Customer (name, email, saved cards) is deleted; a host's
+// tax details are kept, still encrypted, while platform reporting needs them.
 
 /** How long the user has to change their mind. */
 export const DELETION_UNDO_DAYS = 7;
@@ -31,7 +36,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Why an account cannot be deleted yet. */
 export interface DeletionBlocker {
-  readonly code: "open-booking" | "host-open-booking" | "unpaid-balance";
+  readonly code: "open-booking" | "host-open-booking" | "payment-in-flight";
   readonly message: string;
 }
 
@@ -48,8 +53,8 @@ const finishedStatuses = [...TERMINAL_BOOKING_STATUSES];
 
 /**
  * What stops the user's account being deleted now: bookings that are not
- * finished, as the driver or on the user's chargers, and payments still owed
- * on finished bookings.
+ * finished, as the driver or on the user's chargers, and money still moving:
+ * a payment whose outcome is not settled, or a refund in flight, either way.
  */
 export async function deletionBlockers(db: Executor, userId: string): Promise<DeletionBlocker[]> {
   const blockers: DeletionBlocker[] = [];
@@ -77,25 +82,16 @@ export async function deletionBlockers(db: Executor, userId: string): Promise<De
       message: "A driver has a booking on your charger that is not finished.",
     });
   }
-  const [unpaid] = await db
+  const [unsettled] = await db
     .select({ id: payments.id })
     .from(payments)
     .innerJoin(bookings, eq(bookings.id, payments.bookingId))
-    .where(
-      and(
-        eq(bookings.driverId, userId),
-        inArray(payments.status, ["pending_authorisation", "card_saved", "authorised", "failed"]),
-        or(
-          inArray(bookings.status, ["completed", "no_show"]),
-          and(eq(bookings.status, "cancelled"), gt(bookings.cancellationFeeCents, 0)),
-        ),
-      ),
-    )
+    .where(and(eq(bookings.driverId, userId), inArray(payments.status, ["pending", "authorised"])))
     .limit(1);
-  if (unpaid !== undefined) {
+  if (unsettled !== undefined || (await hasRefundInFlight(db, userId))) {
     blockers.push({
-      code: "unpaid-balance",
-      message: "A payment for a past booking has not been settled yet.",
+      code: "payment-in-flight",
+      message: "A payment or refund is still going through. Try again in a few days.",
     });
   }
   return blockers;
@@ -227,16 +223,41 @@ export async function revokeSessions(db: Executor, userId: string): Promise<void
 /** Charger positions are coarsened to this grid (degrees, about 11 km) on deletion. */
 const COARSE_GRID_DEGREES = 0.1;
 
+/** What anonymising needs besides the database. */
+export interface DeletionOptions {
+  /** Deletes the driver's Stripe Customer. */
+  readonly payments: Pick<StripePayments, "deleteCustomer">;
+  /** Years a host's tax details are kept for platform reporting after deletion. */
+  readonly taxRecordRetentionYears: number;
+}
+
+/** `now` plus whole UTC years. */
+function yearsAfter(now: Date, years: number): Date {
+  const at = new Date(now);
+  at.setUTCFullYear(at.getUTCFullYear() + years);
+  return at;
+}
+
 /**
  * Removes the personal data of one user, keeping their row as a tombstone
- * so bookings, payments, transfers, reviews and disputes still add up.
+ * so bookings, payments, refunds, reviews and disputes still add up. Their
+ * Stripe Customer is deleted first; when that fails, the whole deletion is
+ * rolled back and retried on the next run.
  */
-async function anonymise(tx: Executor, userId: string, now: Date): Promise<void> {
+async function anonymise(
+  tx: Executor,
+  userId: string,
+  now: Date,
+  options: DeletionOptions,
+): Promise<void> {
   const [user] = await tx
-    .select({ email: users.email, phone: users.phone })
+    .select({ email: users.email, phone: users.phone, stripeCustomerId: users.stripeCustomerId })
     .from(users)
     .where(eq(users.id, userId));
   if (user === undefined) return;
+  if (user.stripeCustomerId !== null) {
+    await options.payments.deleteCustomer(user.stripeCustomerId);
+  }
 
   await tx
     .update(users)
@@ -270,7 +291,23 @@ async function anonymise(tx: Executor, userId: string, now: Date): Promise<void>
 
   const [host] = await tx.select({ id: hosts.id }).from(hosts).where(eq(hosts.userId, userId));
   if (host !== undefined) {
-    await tx.delete(hostTaxDetails).where(eq(hostTaxDetails.hostId, host.id));
+    // A host who was paid has reportable earnings: their tax details stay
+    // (encrypted) until the retention period ends; the purge job removes them.
+    const [earned] = await tx
+      .select({ id: payments.id })
+      .from(payments)
+      .innerJoin(bookings, eq(bookings.id, payments.bookingId))
+      .innerJoin(chargers, eq(chargers.id, bookings.chargerId))
+      .where(and(eq(chargers.hostId, host.id), eq(payments.status, "paid")))
+      .limit(1);
+    if (earned === undefined) {
+      await tx.delete(hostTaxDetails).where(eq(hostTaxDetails.hostId, host.id));
+    } else {
+      await tx
+        .update(hostTaxDetails)
+        .set({ retainUntil: yearsAfter(now, options.taxRecordRetentionYears) })
+        .where(eq(hostTaxDetails.hostId, host.id));
+    }
     await tx
       .update(hosts)
       .set({ taxDetailsComplete: false, nightRateStart: null, nightRateEnd: null })
@@ -295,43 +332,55 @@ export interface DeletionRun {
   readonly completed: number;
   /** Requests that fell due but are blocked; they stay pending and are retried next run. */
   readonly skipped: readonly { userId: string; blockers: readonly DeletionBlocker[] }[];
+  /** Requests that failed (the payment provider did not answer); retried next run. */
+  readonly failed: number;
 }
 
 /**
  * Scheduled step: anonymises every account whose deletion fell due at or
  * before `now`. Each account is handled in its own transaction; a request
- * that something now blocks (for example a payment still owed) is left
- * pending and retried on the next run. Safe to run concurrently and
+ * that something now blocks (for example a refund still in flight), or whose
+ * Stripe Customer could not be deleted, is left pending and retried on the
+ * next run. Safe to run concurrently and
  * repeatedly. The `account-deletions` job runs it daily.
  */
-export async function processDueDeletions(db: Executor, now: Date): Promise<DeletionRun> {
+export async function processDueDeletions(
+  db: Executor,
+  now: Date,
+  options: DeletionOptions,
+): Promise<DeletionRun> {
   const due = await db
     .select({ id: accountDeletions.id })
     .from(accountDeletions)
     .where(and(pending, lte(accountDeletions.dueAt, now)))
     .orderBy(asc(accountDeletions.dueAt));
   let completed = 0;
+  let failed = 0;
   const skipped: { userId: string; blockers: readonly DeletionBlocker[] }[] = [];
   for (const { id } of due) {
-    await db.transaction(async (tx) => {
-      const [request] = await tx
-        .select({ userId: accountDeletions.userId })
-        .from(accountDeletions)
-        .where(and(eq(accountDeletions.id, id), pending))
-        .for("update", { skipLocked: true });
-      if (request === undefined) return;
-      const blockers = await deletionBlockers(tx, request.userId);
-      if (blockers.length > 0) {
-        skipped.push({ userId: request.userId, blockers });
-        return;
-      }
-      await anonymise(tx, request.userId, now);
-      await tx
-        .update(accountDeletions)
-        .set({ completedAt: now })
-        .where(eq(accountDeletions.id, id));
-      completed += 1;
-    });
+    await db
+      .transaction(async (tx) => {
+        const [request] = await tx
+          .select({ userId: accountDeletions.userId })
+          .from(accountDeletions)
+          .where(and(eq(accountDeletions.id, id), pending))
+          .for("update", { skipLocked: true });
+        if (request === undefined) return;
+        const blockers = await deletionBlockers(tx, request.userId);
+        if (blockers.length > 0) {
+          skipped.push({ userId: request.userId, blockers });
+          return;
+        }
+        await anonymise(tx, request.userId, now, options);
+        await tx
+          .update(accountDeletions)
+          .set({ completedAt: now })
+          .where(eq(accountDeletions.id, id));
+        completed += 1;
+      })
+      .catch(() => {
+        failed += 1;
+      });
   }
-  return { completed, skipped };
+  return { completed, skipped, failed };
 }

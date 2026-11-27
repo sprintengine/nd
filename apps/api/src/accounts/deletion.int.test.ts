@@ -10,9 +10,9 @@ import {
   hosts,
   hostTaxDetails,
   payments,
+  refunds,
   reviews,
   sessions,
-  transfers,
   users,
 } from "@nd/db";
 import { eq, sql } from "drizzle-orm";
@@ -20,15 +20,28 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { type Harness, startHarness } from "../../test/harness.ts";
 import { APP_ORIGIN, magicLinkPath } from "../../test/http.ts";
-import { DELETION_UNDO_DAYS, hashUndoToken, processDueDeletions } from "./deletion.ts";
+import { purgeExpiredTaxRecords } from "../compliance/retention.ts";
+import { stripePaymentsFrom } from "../stripe/payments.ts";
+import {
+  DELETION_UNDO_DAYS,
+  type DeletionOptions,
+  hashUndoToken,
+  processDueDeletions as processDue,
+} from "./deletion.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 let now = new Date();
 let h: Harness;
 
+let options: DeletionOptions;
+
 beforeAll(async () => {
   h = await startHarness({ clock: { now: () => now } });
+  options = { payments: stripePaymentsFrom(h.stripeMock.sdk), taxRecordRetentionYears: 6 };
 });
+
+/** The scheduled step, deleting Stripe Customers through stripe-mock. */
+const processDueDeletions = (db: Executor, at: Date) => processDue(db, at, options);
 
 afterAll(async () => {
   await h.close();
@@ -115,7 +128,7 @@ async function hostWithCharger(db: Executor, userId: string) {
 }
 
 let slotDay = 0;
-/** A booking in `status`, with a captured payment and a sent transfer of `cents`. */
+/** A booking in `status`, paid upfront: `cents`, of which 1.5 % + 25 cents is the card fee. */
 async function paidBooking(
   db: Executor,
   chargerId: string,
@@ -144,25 +157,23 @@ async function paidBooking(
     .insert(payments)
     .values({
       bookingId: booking.id,
-      authorisedCents: cents,
-      capturedCents: cents,
-      status: "captured",
+      amountCents: cents,
+      cardFeeCents: Math.ceil((cents * 150) / 10_000) + 25,
+      status: "paid",
     })
     .returning({ id: payments.id });
   if (payment === undefined) throw new Error("no payment");
-  await db.insert(transfers).values({ paymentId: payment.id, amountCents: cents, status: "sent" });
   return booking.id;
 }
 
-/** What the host has been paid: every transfer on bookings of their chargers. */
+/** What the host received: the paid bookings on their chargers, less the card fees. */
 async function payoutSum(hostId: string): Promise<number> {
   const result = await h.database.db.execute<{ total: string | null }>(sql`
-    select sum(t.amount_cents) as total
-      from transfers t
-      join payments p on p.id = t.payment_id
+    select sum(p.amount_cents - p.card_fee_cents - p.platform_fee_cents) as total
+      from payments p
       join bookings b on b.id = p.booking_id
       join chargers c on c.id = b.charger_id
-     where c.host_id = ${hostId}`);
+     where c.host_id = ${hostId} and p.status = 'paid'`);
   return Number(result.rows[0]?.total ?? 0);
 }
 
@@ -243,7 +254,7 @@ describe("POST /me/delete", () => {
     expect(refused.json()).toMatchObject({ reasons: [{ code: "host-open-booking" }] });
   });
 
-  it("is refused while a payment for a finished booking is owed", async () => {
+  it("is refused while a refund is still in flight", async () => {
     const hostEmail = "eoin.host@example.com";
     await h.user(hostEmail);
     const { chargerId } = await hostWithCharger(h.database.db, await userIdOf(hostEmail));
@@ -255,13 +266,19 @@ describe("POST /me/delete", () => {
       await userIdOf(driverEmail),
       1500,
     );
-    await h.database.db
-      .update(payments)
-      .set({ status: "authorised", capturedCents: 0 })
+    const [payment] = await h.database.db
+      .select({ id: payments.id })
+      .from(payments)
       .where(eq(payments.bookingId, bookingId));
+    await h.database.db.insert(refunds).values({
+      paymentId: payment?.id ?? "",
+      amountCents: 500,
+      currency: "EUR",
+      reason: "support",
+    });
     const response = await requestDeletion(driver);
     expect(response.statusCode).toBe(409);
-    expect(response.json()).toMatchObject({ reasons: [{ code: "unpaid-balance" }] });
+    expect(response.json()).toMatchObject({ reasons: [{ code: "payment-in-flight" }] });
   });
 
   it("takes the host's chargers off the listings, and an undo puts them back", async () => {
@@ -304,7 +321,7 @@ describe("POST /me/delete", () => {
 });
 
 describe("processDueDeletions", () => {
-  it("anonymises a host after the window and keeps their payouts adding up", async () => {
+  it("anonymises a host after the window, keeps their earnings adding up and their tax details for reporting", async () => {
     const email = "niamh.delete@example.com";
     const cookie = await h.user(email, "+353861119999");
     const userId = await userIdOf(email);
@@ -323,8 +340,14 @@ describe("processDueDeletions", () => {
       accountId: "google-123",
       providerId: "google",
     });
+    const customer = await h.stripeMock.sdk.customers.create({ email, name: "Niamh" });
+    await h.database.db
+      .update(users)
+      .set({ stripeCustomerId: customer.id })
+      .where(eq(users.id, userId));
     const before = await payoutSum(hostId);
-    expect(before).toBe(4250);
+    // 2400 − 61 and 1850 − 53: each less its card fee.
+    expect(before).toBe(4136);
 
     const requestedAt = new Date();
     now = requestedAt;
@@ -354,9 +377,17 @@ describe("processDueDeletions", () => {
       deletedAt: due,
     });
     expect(JSON.stringify(user)).not.toContain("niamh");
-    expect(
-      await h.database.db.select().from(hostTaxDetails).where(eq(hostTaxDetails.hostId, hostId)),
-    ).toEqual([]);
+    expect(h.stripeMock.deletedCustomers).toContain(customer.id);
+    // Paid bookings are reportable: the tax details stay, encrypted, for six years.
+    const retainUntil = new Date(due);
+    retainUntil.setUTCFullYear(retainUntil.getUTCFullYear() + 6);
+    const taxRows = () =>
+      h.database.db.select().from(hostTaxDetails).where(eq(hostTaxDetails.hostId, hostId));
+    expect(await taxRows()).toMatchObject([{ retainUntil, tinEncrypted: "sealed" }]);
+    await purgeExpiredTaxRecords(h.database.db, new Date(retainUntil.getTime() - 1));
+    expect(await taxRows()).toHaveLength(1);
+    await purgeExpiredTaxRecords(h.database.db, retainUntil);
+    expect(await taxRows()).toEqual([]);
     expect(
       await h.database.db.select().from(deviceTokens).where(eq(deviceTokens.userId, userId)),
     ).toEqual([]);
@@ -450,5 +481,18 @@ describe("processDueDeletions", () => {
     });
     const [user] = await h.database.db.select().from(users).where(eq(users.id, userId));
     expect(user?.email).toBe(email);
+  });
+
+  it("deletes the tax details of a host who was never paid", async () => {
+    const email = "orla.host@example.com";
+    const cookie = await h.user(email);
+    const userId = await userIdOf(email);
+    const { hostId } = await hostWithCharger(h.database.db, userId);
+    now = new Date();
+    expect((await requestDeletion(cookie)).statusCode).toBe(202);
+    await processDueDeletions(h.database.db, new Date(Date.now() + DELETION_UNDO_DAYS * DAY_MS));
+    expect(
+      await h.database.db.select().from(hostTaxDetails).where(eq(hostTaxDetails.hostId, hostId)),
+    ).toEqual([]);
   });
 });

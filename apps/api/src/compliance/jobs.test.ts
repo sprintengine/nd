@@ -15,6 +15,7 @@ vi.mock("../accounts/deletion.ts", async (importOriginal) => ({
 vi.mock("./retention.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof retention>()),
   purgeExpiredTelemetry: vi.fn(),
+  purgeExpiredTaxRecords: vi.fn(),
 }));
 
 function services() {
@@ -24,6 +25,8 @@ function services() {
     services: {
       db: { marker: "db" },
       clock: { now: () => NOW },
+      payments: { marker: "payments" },
+      taxRecordRetentionYears: 6,
       log,
     } as unknown as Services,
   };
@@ -44,32 +47,38 @@ describe("compliance jobs", () => {
         { userId: "user-1", blockers: [{ code: "open-booking", message: "m" }] },
         { userId: "user-2", blockers: [{ code: "open-booking", message: "m" }] },
       ],
+      failed: 1,
     });
     const { services: context, log } = services();
     const jobs = memoryJobs();
     await jobs.runner.start(COMPLIANCE_JOBS, context, log);
     await jobs.runner.runNow(accountDeletionsJob, {});
-    expect(deletion.processDueDeletions).toHaveBeenCalledWith(context.db, NOW);
+    expect(deletion.processDueDeletions).toHaveBeenCalledWith(context.db, NOW, {
+      payments: context.payments,
+      taxRecordRetentionYears: 6,
+    });
     expect(log.info).toHaveBeenCalledWith(
-      { completed: 2, blocked: 2, reasons: ["open-booking"] },
+      { completed: 2, failed: 1, blocked: 2, reasons: ["open-booking"] },
       "account deletions processed",
     );
     expect(JSON.stringify(log.info.mock.calls)).not.toContain("user-1");
   });
 
-  it("purge expired telemetry as of now", async () => {
+  it("purge expired telemetry and tax records as of now", async () => {
     vi.mocked(retention.purgeExpiredTelemetry).mockResolvedValueOnce({
       ocppMessages: 4,
       meterValues: 9,
     });
+    vi.mocked(retention.purgeExpiredTaxRecords).mockResolvedValueOnce(2);
     const { services: context, log } = services();
     const jobs = memoryJobs();
     await jobs.runner.start(COMPLIANCE_JOBS, context, log);
     await jobs.runner.runNow(telemetryRetentionJob, {});
     expect(retention.purgeExpiredTelemetry).toHaveBeenCalledWith(context.db, NOW);
+    expect(retention.purgeExpiredTaxRecords).toHaveBeenCalledWith(context.db, NOW);
     expect(log.info).toHaveBeenCalledWith(
-      { ocppMessages: 4, meterValues: 9 },
-      "expired telemetry purged",
+      { ocppMessages: 4, meterValues: 9, taxRecords: 2 },
+      "expired telemetry and tax records purged",
     );
   });
 

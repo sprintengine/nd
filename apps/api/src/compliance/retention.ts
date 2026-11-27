@@ -1,5 +1,5 @@
-import { type Executor, meterValues } from "@nd/db";
-import { inArray, lt, sql } from "drizzle-orm";
+import { type Executor, hostTaxDetails, meterValues } from "@nd/db";
+import { inArray, lt, lte, sql } from "drizzle-orm";
 
 /** Meter values and OCPP messages are kept this many months, then purged. */
 export const TELEMETRY_RETENTION_MONTHS = 24;
@@ -49,4 +49,18 @@ export async function purgeExpiredTelemetry(db: Executor, now: Date): Promise<Te
     if (deleted.length < BATCH_SIZE) break;
   }
   return { ocppMessages, meterValues: meterValueCount };
+}
+
+/**
+ * Scheduled step: deletes the tax details of deleted hosts once the period
+ * they were kept for platform reporting has passed (`retain_until`, set when
+ * the account was anonymised). Resolves to how many were deleted. The
+ * `telemetry-retention` job runs it daily.
+ */
+export async function purgeExpiredTaxRecords(db: Executor, now: Date): Promise<number> {
+  const deleted = await db
+    .delete(hostTaxDetails)
+    .where(lte(hostTaxDetails.retainUntil, now))
+    .returning({ hostId: hostTaxDetails.hostId });
+  return deleted.length;
 }

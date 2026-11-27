@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { scriptedDb } from "../../test/fake-db.ts";
-import { purgeExpiredTelemetry, TELEMETRY_RETENTION_MONTHS, telemetryCutoff } from "./retention.ts";
+import {
+  purgeExpiredTaxRecords,
+  purgeExpiredTelemetry,
+  TELEMETRY_RETENTION_MONTHS,
+  telemetryCutoff,
+} from "./retention.ts";
 
 describe("telemetryCutoff", () => {
   it("counts 24 calendar months back from now", () => {
@@ -31,5 +36,16 @@ describe("purgeExpiredTelemetry", () => {
       ocppMessages: 0,
       meterValues: 0,
     });
+  });
+});
+
+describe("purgeExpiredTaxRecords", () => {
+  it("deletes the tax details whose retention has ended", async () => {
+    const now = new Date("2033-01-12T00:00:00Z");
+    const { db, queries } = scriptedDb([[["host-1"], ["host-2"]]]);
+    await expect(purgeExpiredTaxRecords(db, now)).resolves.toBe(2);
+    expect(queries[0]?.text).toContain('delete from "host_tax_details"');
+    expect(queries[0]?.text).toContain('"retain_until" <= $1');
+    expect(queries[0]?.params).toEqual([now.toISOString()]);
   });
 });
