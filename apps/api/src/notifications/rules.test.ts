@@ -144,11 +144,11 @@ describe("messageFor", () => {
     }
   });
 
-  it("says what was billed and earned once settled, and only that it ended before", () => {
+  it("says what was paid and earned once settled, and only that it ended before", () => {
     const facts = { booking: booking({ status: "completed" }), kwh: 8.43 };
     const settled = { billedCents: 1875, earningsCents: 1875, currency: "EUR" };
     expect(messageFor("session_ended", { ...facts, settled }).body).toBe(
-      "Your guest was billed €18.75 for 8.4 kWh. You earn €18.75.",
+      "Your guest paid €18.75 and charged 8.4 kWh. You receive €18.75 after card fees.",
     );
     expect(
       messageFor("session_ended", {
@@ -156,12 +156,12 @@ describe("messageFor", () => {
         kwh: null,
         settled: { ...settled, earningsCents: 1700 },
       }).body,
-    ).toBe("Your guest was billed €18.75. You earn €17.00.");
+    ).toBe("Your guest paid €18.75. You receive €17.00 after card fees.");
     expect(messageFor("session_ended", facts).body).toBe(
-      "Your guest's session has ended (8.4 kWh). Your earnings show once it is settled.",
+      "Your guest's session has ended (8.4 kWh).",
     );
-    expect(messageFor("session_ended", { booking: booking(), kwh: null }).body).toContain(
-      "has ended. Your earnings",
+    expect(messageFor("session_ended", { booking: booking(), kwh: null }).body).toBe(
+      "Your guest's session has ended.",
     );
   });
 

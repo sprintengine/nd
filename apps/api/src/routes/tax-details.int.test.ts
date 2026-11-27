@@ -1,6 +1,4 @@
-import { randomBytes } from "node:crypto";
-
-import { bookings, chargers, hosts, hostTaxDetails, payments, transfers, users } from "@nd/db";
+import { hosts, hostTaxDetails, users } from "@nd/db";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -47,14 +45,6 @@ const individual = {
   taxCountry: "IE",
   tin: "1234567 fa",
 };
-
-async function idOf(email: string): Promise<string> {
-  const [user] = await h.database.db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.email, email));
-  return user?.id ?? "";
-}
 
 const put = (cookie: string, payload: object) =>
   h.app.inject({ method: "PUT", url: "/hosts/me/tax-details", headers: { cookie }, payload });
@@ -186,63 +176,6 @@ describe("PUT /hosts/me/tax-details", () => {
 
   it("restores the individual details for the next tests", async () => {
     expect((await put(aoife.cookie, individual)).statusCode).toBe(200);
-  });
-});
-
-describe("held transfers", () => {
-  it("are re-evaluated once the tax details are complete", async () => {
-    const sam = await host("sam.tax@example.com", "+353861110004");
-    const suffix = randomBytes(4).toString("hex");
-    const [charger] = await h.database.db
-      .insert(chargers)
-      .values({
-        hostId: sam.hostId,
-        model: "zappi_v2_1",
-        serial: `2${suffix}`,
-        chargeboxId: `tax-${suffix}`,
-        maxKw: 7.4,
-        connectorType: "tethered",
-        location: { lat: 53.33, lng: -6.25 },
-        address: "4 Test Row",
-      })
-      .returning({ id: chargers.id });
-    const [booking] = await h.database.db
-      .insert(bookings)
-      .values({
-        chargerId: charger?.id ?? "",
-        driverId: await idOf("aoife.tax@example.com"),
-        slot: { start: new Date("2026-02-01T22:00:00Z"), end: new Date("2026-02-02T06:00:00Z") },
-        status: "completed",
-        idTag: `T${suffix}`,
-        quotedAmountCents: 2000,
-      })
-      .returning({ id: bookings.id });
-    const [payment] = await h.database.db
-      .insert(payments)
-      .values({
-        bookingId: booking?.id ?? "",
-        authorisedCents: 2000,
-        capturedCents: 2000,
-        status: "captured",
-      })
-      .returning({ id: payments.id });
-    const paymentId = payment?.id ?? "";
-    await h.database.db.insert(transfers).values({
-      paymentId,
-      amountCents: 2000,
-      status: "held",
-      holdReason: "tax_details_incomplete",
-    });
-
-    expect((await put(sam.cookie, { ...individual, legalName: "Sam Byrne" })).statusCode).toBe(200);
-    await h.jobs.drain();
-
-    // Sam's payouts account is still pending, so the transfer now waits for that instead.
-    const [transfer] = await h.database.db
-      .select({ status: transfers.status, holdReason: transfers.holdReason })
-      .from(transfers)
-      .where(eq(transfers.paymentId, paymentId));
-    expect(transfer).toEqual({ status: "held", holdReason: "payouts_not_enabled" });
   });
 });
 

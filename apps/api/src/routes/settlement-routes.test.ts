@@ -3,13 +3,15 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BOOKING_ID, bookingDetail } from "../../test/booking-detail.ts";
-import { SESSION_ID, sessionRow, settlementSession } from "../../test/settlement-session.ts";
+import { sessionRow } from "../../test/settlement-session.ts";
 import { SESSION_COOKIE, signInAs, startUnitApp, USER_ID } from "../../test/unit-app.ts";
 import * as bookingData from "../data/bookings.ts";
+import * as paymentData from "../data/payments.ts";
 import * as data from "../data/settlement.ts";
 
 vi.mock("../data/bookings.ts");
 vi.mock("../data/settlement.ts");
+vi.mock("../data/payments.ts");
 vi.mock("@nd/db", async (importOriginal) => {
   const actual = await importOriginal<typeof NdDb>();
   return {
@@ -45,102 +47,133 @@ afterEach(async () => {
   vi.resetAllMocks();
 });
 
+const refundRow = (overrides: Partial<paymentData.Refund> = {}): paymentData.Refund => ({
+  id: "refund-1",
+  paymentId: "33333333-3333-4333-8333-333333333333",
+  amountCents: 250,
+  currency: "EUR",
+  reason: "support",
+  status: "succeeded",
+  stripeRefundId: "re_1",
+  issuedById: null,
+  note: null,
+  failureReason: null,
+  createdAt: new Date("2027-01-13T09:00:00Z"),
+  updatedAt: new Date("2027-01-13T09:00:00Z"),
+  ...overrides,
+});
+
 describe("GET /bookings/:id/receipt", () => {
-  it("shows the driver the time billed, the cap, the card and the energy", async () => {
+  beforeEach(() => {
+    vi.mocked(paymentData.refundsOf).mockResolvedValue([]);
+    vi.mocked(data.meterSamples).mockResolvedValue([]);
+  });
+
+  it("shows the driver the price paid upfront, refunds, the card and the session as evidence", async () => {
     vi.mocked(bookingData.findBookingDetail).mockResolvedValue(
-      bookingDetail(USER_ID, {
-        booking: { status: "completed" },
-        payment: { status: "captured", capturedCents: 1000, platformFeeCents: 100 },
-      }),
+      bookingDetail(USER_ID, { booking: { status: "completed" } }),
     );
     vi.mocked(data.billedSessionOf).mockResolvedValue(
       sessionRow({
         status: "reconciled",
-        stoppedAt: new Date("2027-01-13T02:01:00Z"),
-        meterStopWh: 31_000,
+        stoppedAt: new Date("2027-01-13T01:00:00Z"),
+        meterStopWh: 21_000,
       }),
     );
-    vi.mocked(bookingData.findTransfer).mockResolvedValue(undefined);
-    vi.mocked(data.findReview).mockResolvedValue(undefined);
+    vi.mocked(data.meterSamples).mockResolvedValue([
+      { ts: new Date("2027-01-12T22:30:00Z"), energyWh: 4_600, powerW: 7_200 },
+      { ts: new Date("2027-01-12T23:00:00Z"), energyWh: null, powerW: null },
+    ]);
+    vi.mocked(paymentData.refundsOf).mockResolvedValue([
+      refundRow(),
+      refundRow({ id: "refund-2", status: "failed", amountCents: 100 }),
+    ]);
     const response = await inject("GET", `/bookings/${BOOKING_ID}/receipt`);
     expect(response.statusCode, response.body).toBe(200);
     expect(response.json()).toMatchObject({
       role: "driver",
-      status: "paid",
-      durationMinutes: 241,
-      billedMinutes: 245,
-      kwh: 30,
-      meter: { startKwh: 1, stopKwh: 31 },
-      lines: [
-        { kind: "time", description: "4 h 5 min at €2.50 an hour", amountCents: 1021 },
-        { kind: "cap", description: "Capped at the quoted €10.00", amountCents: -21 },
-        { kind: "platform_fee", amountCents: 100 },
+      bookingStatus: "completed",
+      bookedMinutes: 240,
+      pricePerHourCents: 250,
+      paidCents: 1000,
+      refundedCents: 250,
+      totalCents: 750,
+      refunds: [
+        { amountCents: 250, reason: "support", status: "succeeded" },
+        { amountCents: 100, status: "failed" },
       ],
-      capNote: expect.stringContaining("never goes above the quote of €10.00") as unknown,
-      totalCents: 1000,
-      platformFeeCents: 100,
-      effectiveCentsPerKwh: 33,
+      session: {
+        status: "reconciled",
+        startedAt: "2027-01-12T22:00:00.000Z",
+        stoppedAt: "2027-01-13T01:00:00.000Z",
+        kwh: 20,
+        meter: { startKwh: 1, stopKwh: 21 },
+        samples: [
+          { at: "2027-01-12T22:30:00.000Z", registerKwh: 4.6, kw: 7.2 },
+          { at: "2027-01-12T23:00:00.000Z", registerKwh: null, kw: null },
+        ],
+      },
+      effectiveCentsPerKwh: 38,
       card: { brand: "visa", last4: "4242" },
-      hostPayout: null,
+      hostEarnings: null,
       canReview: true,
     });
+    expect(data.meterSamples).toHaveBeenCalledWith(expect.anything(), expect.any(String), 500);
   });
 
-  it("shows the host the transfer and the driver's review, without the card", async () => {
-    vi.mocked(bookingData.findBookingDetail).mockResolvedValue(
-      bookingDetail("user-cian", { host: { userId: USER_ID } }),
-    );
+  it("shows the host the card fee passed on and what they keep, without the card", async () => {
+    vi.mocked(bookingData.findBookingDetail).mockResolvedValue({
+      ...bookingDetail("user-cian", { booking: { status: "completed" } }),
+      host: {
+        id: "host-1",
+        userId: USER_ID,
+        cancellationCutoffMinutes: 120,
+        stripeAccountId: "acct_host",
+      },
+    });
     vi.mocked(data.billedSessionOf).mockResolvedValue(
-      sessionRow({ meterStopWh: null, meterStartWh: null, kwh: null, startedAt: null }),
+      sessionRow({ status: "needs_review", meterStopWh: null, kwh: null }),
     );
-    vi.mocked(bookingData.findTransfer).mockResolvedValue({
-      amountCents: 917,
-      status: "held",
-      holdReason: "tax_details_incomplete",
-    } as never);
     vi.mocked(data.findReview).mockResolvedValue({
       id: "r1",
-      rating: 5,
-      comment: null,
-      createdAt: new Date("2027-01-13T09:00:00Z"),
+      rating: 4,
+      comment: "Fine",
+      createdAt: new Date("2027-01-13T10:00:00Z"),
     });
     const response = await inject("GET", `/bookings/${BOOKING_ID}/receipt`);
     expect(response.json()).toMatchObject({
       role: "host",
-      status: "pending",
-      kwh: null,
-      meter: { startKwh: null, stopKwh: null },
-      effectiveCentsPerKwh: null,
       card: null,
-      hostPayout: { amountCents: 917, status: "held", holdReason: "tax_details_incomplete" },
-      review: { rating: 5, comment: null, createdAt: "2027-01-13T09:00:00.000Z" },
+      session: { status: "needs_review", kwh: null },
+      effectiveCentsPerKwh: null,
+      hostEarnings: { grossCents: 1000, cardFeeCents: 40, platformFeeCents: 0, netCents: 960 },
+      review: { rating: 4, comment: "Fine" },
       canReview: false,
     });
-    expect(unit.payments.callsTo("findCard")).toEqual([]);
   });
 
-  it("shows the status of a session waiting for the host or for review, even without a card", async () => {
+  it("is ready for a finished booking with no session, even when the card cannot be read", async () => {
     vi.mocked(bookingData.findBookingDetail).mockResolvedValue(
-      bookingDetail(USER_ID, { payment: null }),
+      bookingDetail(USER_ID, { booking: { status: "no_show" } }),
     );
-    vi.mocked(data.billedSessionOf).mockResolvedValue(
-      sessionRow({ status: "needs_host_confirmation" }),
+    vi.mocked(data.billedSessionOf).mockResolvedValue(undefined);
+    vi.spyOn(unit.payments.payments, "findCard").mockRejectedValue(new Error("stripe down"));
+    const response = await inject("GET", `/bookings/${BOOKING_ID}/receipt`);
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ session: null, card: null, canReview: false });
+    expect(data.meterSamples).not.toHaveBeenCalled();
+    vi.mocked(bookingData.findBookingDetail).mockResolvedValue(
+      bookingDetail(USER_ID, {
+        booking: { status: "completed" },
+        driver: { stripeCustomerId: null },
+      }),
     );
     expect((await inject("GET", `/bookings/${BOOKING_ID}/receipt`)).json()).toMatchObject({
-      status: "awaiting_host_confirmation",
-      card: null,
-      totalCents: 917,
-    });
-    vi.mocked(data.billedSessionOf).mockResolvedValue(sessionRow({ status: "needs_review" }));
-    vi.mocked(bookingData.findBookingDetail).mockResolvedValue(bookingDetail(USER_ID));
-    vi.spyOn(unit.payments.payments, "findCard").mockRejectedValue(new Error("Stripe down"));
-    expect((await inject("GET", `/bookings/${BOOKING_ID}/receipt`)).json()).toMatchObject({
-      status: "needs_review",
       card: null,
     });
   });
 
-  it("is 404 for anyone else and 409 before the session stops", async () => {
+  it("is 404 for anyone else and 409 until a paid booking has finished", async () => {
     vi.mocked(bookingData.findBookingDetail).mockResolvedValue(bookingDetail("user-cian"));
     expect((await inject("GET", `/bookings/${BOOKING_ID}/receipt`)).statusCode).toBe(404);
     vi.mocked(bookingData.findBookingDetail).mockResolvedValue(undefined);
@@ -152,6 +185,13 @@ describe("GET /bookings/:id/receipt", () => {
       code: "receipt-not-ready",
     });
     vi.mocked(data.billedSessionOf).mockResolvedValue(undefined);
+    expect((await inject("GET", `/bookings/${BOOKING_ID}/receipt`)).statusCode).toBe(409);
+    vi.mocked(bookingData.findBookingDetail).mockResolvedValue(
+      bookingDetail(USER_ID, {
+        booking: { status: "cancelled" },
+        payment: { status: "cancelled" },
+      }),
+    );
     expect((await inject("GET", `/bookings/${BOOKING_ID}/receipt`)).statusCode).toBe(409);
   });
 });
@@ -210,85 +250,81 @@ describe("POST /bookings/:id/review", () => {
   });
 });
 
-describe("host session routes", () => {
-  const awaiting = () => {
-    const found = settlementSession({
-      session: { status: "needs_host_confirmation", confirmationDueAt: new Date() },
-    });
-    vi.mocked(data.findSettlementSession).mockResolvedValue({
-      ...found,
-      host: { ...found.host, userId: USER_ID },
-    });
-  };
+describe("POST /admin/bookings/:id/refund", () => {
+  const url = `/admin/bookings/${BOOKING_ID}/refund`;
 
-  it("confirms a session and queues its reconciliation", async () => {
-    awaiting();
-    const response = await inject("POST", `/hosts/sessions/${SESSION_ID}/confirm`);
-    expect(response.statusCode, response.body).toBe(202);
-    expect(response.json()).toEqual({ sessionId: SESSION_ID, confirmed: true });
-    expect(unit.jobs.sent.map((job) => job.name)).toEqual(["reconcile-session"]);
-  });
-
-  it("records a dispute", async () => {
-    awaiting();
-    vi.mocked(data.insertDispute).mockResolvedValue("88888888-8888-4888-8888-888888888888");
-    const response = await inject("POST", `/hosts/sessions/${SESSION_ID}/dispute`, {
-      reason: "Car was still charging at 07:00",
-      details: "The app showed 30 kWh",
-    });
-    expect(response.statusCode, response.body).toBe(201);
-    expect(response.json()).toEqual({
-      sessionId: SESSION_ID,
-      disputeId: "88888888-8888-4888-8888-888888888888",
-    });
-    expect(data.insertDispute).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ details: "The app showed 30 kWh" }),
-    );
-    awaiting();
-    await inject("POST", `/hosts/sessions/${SESSION_ID}/dispute`, { reason: "No details" });
-    expect(data.insertDispute).toHaveBeenLastCalledWith(
-      expect.anything(),
-      expect.objectContaining({ details: null }),
+  beforeEach(() => {
+    vi.mocked(bookingData.findBookingDetail).mockResolvedValue(bookingDetail("user-cian"));
+    vi.mocked(paymentData.insertRefund).mockImplementation((_db, input) =>
+      Promise.resolve(
+        refundRow({
+          amountCents: input.amountCents,
+          reason: input.reason,
+          status: "pending",
+          stripeRefundId: null,
+        }),
+      ),
     );
   });
-});
 
-describe("POST /admin/sessions/:id/resolve", () => {
   it("is for admins only", async () => {
     await app.close();
     unit = startUnitApp();
     app = unit.app;
     signInAs(app);
-    const response = await inject("POST", `/admin/sessions/${SESSION_ID}/resolve`, {
-      amountCents: 500,
-    });
+    const response = await inject("POST", url, { amountCents: 500, note: "x" });
     expect(response.json()).toMatchObject({ status: 403, code: "admin-only" });
     const anonymous = await app.inject({
       method: "POST",
-      url: `/admin/sessions/${SESSION_ID}/resolve`,
-      payload: { amountCents: 500 },
+      url,
+      payload: { amountCents: 500, note: "x" },
     });
     expect(anonymous.statusCode).toBe(401);
   });
 
-  it("lets an admin settle a session in review", async () => {
-    vi.mocked(data.findSettlementSession).mockResolvedValue(
-      settlementSession({ session: { status: "needs_review" } }),
-    );
-    vi.mocked(bookingData.findBookingDetail).mockResolvedValue(bookingDetail("user-cian"));
-    vi.mocked(bookingData.updatePaymentFrom).mockResolvedValue(true);
-    vi.mocked(bookingData.findTransfer).mockResolvedValue({ id: "t1" } as never);
-    const response = await inject("POST", `/admin/sessions/${SESSION_ID}/resolve`, {
+  it("refunds part of a booking, reversing the host's share and the fee", async () => {
+    const response = await inject("POST", url, { amountCents: 500, note: "Half the night lost" });
+    expect(response.statusCode, response.body).toBe(201);
+    expect(response.json()).toEqual({
+      bookingId: BOOKING_ID,
       amountCents: 500,
+      reason: "support",
+      status: "succeeded",
     });
-    expect(response.statusCode, response.body).toBe(200);
-    expect(response.json()).toEqual({ sessionId: SESSION_ID, amountCents: 500 });
-    expect(data.resolveOpenDisputes).toHaveBeenCalledWith(
-      expect.anything(),
-      BOOKING_ID,
-      "Resolved by support",
-      expect.any(Date),
+    expect(paymentData.insertRefund).toHaveBeenCalledWith(expect.anything(), {
+      paymentId: "33333333-3333-4333-8333-333333333333",
+      amountCents: 500,
+      reason: "support",
+      issuedById: USER_ID,
+      note: "Half the night lost",
+    });
+    expect(unit.payments.callsTo("refund")[0]?.input).toMatchObject({
+      paymentIntentId: "pi_1",
+      amountCents: 500,
+      idempotencyKey: "refund-refund-1",
+    });
+  });
+
+  it("refunds the whole price when no amount is given, and never more than is left", async () => {
+    await inject("POST", url, { note: "Charger broke" });
+    expect(vi.mocked(paymentData.insertRefund).mock.calls[0]?.[1]).toMatchObject({
+      amountCents: 1000,
+    });
+    vi.mocked(paymentData.insertRefund).mockResolvedValue(undefined);
+    const tooMuch = await inject("POST", url, { amountCents: 900, note: "x" });
+    expect(tooMuch.json()).toMatchObject({ status: 422, code: "refund-too-large" });
+    expect(tooMuch.json()).not.toHaveProperty("detail");
+    expect((await inject("POST", url, { note: "x" })).json()).toMatchObject({
+      detail: "Part of this booking has been refunded already; give the amount left.",
+    });
+  });
+
+  it("is 404 for no booking and 409 for one not paid", async () => {
+    vi.mocked(bookingData.findBookingDetail).mockResolvedValue(undefined);
+    expect((await inject("POST", url, { note: "x" })).statusCode).toBe(404);
+    vi.mocked(bookingData.findBookingDetail).mockResolvedValue(
+      bookingDetail("user-cian", { payment: { status: "cancelled" } }),
     );
+    expect((await inject("POST", url, { note: "x" })).json()).toMatchObject({ code: "not-paid" });
   });
 });

@@ -4,35 +4,27 @@ import {
   availabilityRules,
   bookings,
   chargers,
-  disputes,
   hosts,
   meterValues,
   payments,
+  refunds,
   sessions,
-  transfers,
   users,
 } from "@nd/db";
-import { billedAmount, CHARGER_EVENTS_CHANNEL } from "@nd/domain";
+import { CHARGER_EVENTS_CHANNEL } from "@nd/domain";
 import { eq, sql } from "drizzle-orm";
-import Stripe from "stripe";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { type Harness, startHarness } from "../../test/harness.ts";
 import { APP_ORIGIN } from "../../test/http.ts";
 import { stripePaymentsFrom } from "../stripe/payments.ts";
 import { DEFAULT_TIMINGS } from "../timings.ts";
-import {
-  confirmationTimeoutJob,
-  reconcileSessionJob,
-  settlementSweepJob,
-  weeklyPayoutSummaryJob,
-} from "./jobs.ts";
+import { reconcileSessionJob, settlementSweepJob } from "./jobs.ts";
 import { reconcileSession } from "./reconcile.ts";
 import type { SettlementServices } from "./services.ts";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
-const WEBHOOK_SECRET = "whsec_test_secret";
 
 /** A clock the tests move; starts at the real time so pg-boss and Postgres agree. */
 const clock = {
@@ -116,7 +108,7 @@ interface Booked {
   slot: { start: Date; end: Date };
 }
 
-/** A 4-hour booking tomorrow night (quote 1000 cents), authorised on the driver's card. */
+/** A 4-hour booking tomorrow night (1000 cents), paid upfront with the driver's card. */
 async function book(): Promise<Booked> {
   const chargerId = await listCharger();
   const start = nightIn(1);
@@ -130,7 +122,7 @@ async function book(): Promise<Booked> {
   expect(response.statusCode, response.body).toBe(201);
   const body = response.json<{ id: string; quotedAmountCents: number; payment: object }>();
   expect(body.quotedAmountCents).toBe(1000);
-  expect(body.payment).toMatchObject({ status: "authorised", authorisedCents: 1000 });
+  expect(body.payment).toEqual({ status: "paid", amountCents: 1000 });
   return { bookingId: body.id, chargerId, slot: { start, end } };
 }
 
@@ -194,23 +186,20 @@ async function paymentOf(bookingId: string) {
   return row;
 }
 
-async function transferOf(bookingId: string) {
+async function refundsOf(bookingId: string) {
   const payment = await paymentOf(bookingId);
-  const [row] = await h.database.db
-    .select()
-    .from(transfers)
-    .where(eq(transfers.paymentId, payment.id));
-  return row;
+  return h.database.db.select().from(refunds).where(eq(refunds.paymentId, payment.id));
 }
 
-/** Captures stripe-mock recorded for a booking's PaymentIntent. */
-async function capturesOf(bookingId: string) {
+/** Money stripe-mock saw move for a booking: captures and refunds of its PaymentIntent. */
+async function moneyMoved(bookingId: string) {
   const payment = await paymentOf(bookingId);
-  return h.stripeMock.captures.filter((capture) => capture.id === payment.stripePaymentIntentId);
+  const intent = payment.stripePaymentIntentId;
+  return {
+    captures: h.stripeMock.captures.filter((capture) => capture.id === intent).length,
+    refunds: h.stripeMock.refunds.filter((refund) => refund.payment_intent === intent).length,
+  };
 }
-
-const transfersSentFor = (bookingId: string) =>
-  h.stripeMock.transfers.filter((sent) => sent.transfer_group === bookingId);
 
 /** A stopped session of 3 h 39 min with 22.5 kWh delivered, the last MeterValue agreeing. */
 const STOPPED_219 = {
@@ -261,7 +250,8 @@ beforeAll(async () => {
     clock,
     payments: stripePaymentsFrom(h.stripeMock.sdk),
     jobs: h.jobs,
-    platformFeeBps: 0,
+    fees: { platformFeeBps: 0, cardFeeBps: 150, cardFeeFixedCents: 25 },
+    taxRecordRetentionYears: 6,
     timings: DEFAULT_TIMINGS,
     log: { info: () => undefined, warn: () => undefined, error: () => undefined },
     email: h.mail.email,
@@ -277,7 +267,7 @@ describe("reconciliation", () => {
   let booked: Booked;
   let sessionId: string;
 
-  it("reconciles on session_stopped: 3 h 39 min at €2.50 with a 4-hour quote", async () => {
+  it("records the energy on session_stopped and moves no money: the booking was paid upfront", async () => {
     booked = await book();
     sessionId = await insertSession(booked, STOPPED_219);
     const event = {
@@ -305,31 +295,10 @@ describe("reconciliation", () => {
       },
       { timeout: 10_000, interval: 200 },
     );
-
-    const expected = billedAmount(
-      booked.slot.start,
-      new Date(booked.slot.start.getTime() + 219 * MINUTE),
-      250,
-      1000,
-    );
-    expect(expected).toBe(917);
-    expect(expected).toBeLessThan(1000);
-    expect(await capturesOf(booked.bookingId)).toEqual([
-      expect.objectContaining({ amount: expected }),
-    ]);
-    expect(await paymentOf(booked.bookingId)).toMatchObject({
-      status: "captured",
-      capturedCents: expected,
-      platformFeeCents: 0,
-    });
     expect(await sessionRow(sessionId)).toMatchObject({ kwh: 22.5, reviewReason: null });
-    expect(await transferOf(booked.bookingId)).toMatchObject({
-      status: "sent",
-      amountCents: expected,
-    });
-    expect(transfersSentFor(booked.bookingId)).toEqual([
-      expect.objectContaining({ amount: expected, destination: "acct_host_1" }),
-    ]);
+    // Stopping 21 minutes early changes nothing: the driver paid for the booked hours.
+    expect(await paymentOf(booked.bookingId)).toMatchObject({ status: "paid", amountCents: 1000 });
+    expect(await moneyMoved(booked.bookingId)).toEqual({ captures: 0, refunds: 0 });
   });
 
   it("is a no-op when run again", async () => {
@@ -337,46 +306,60 @@ describe("reconciliation", () => {
     await h.jobs.runNow(reconcileSessionJob, { sessionId });
     await h.jobs.runNow(settlementSweepJob, {});
     await h.jobs.drain();
-    expect(await capturesOf(booked.bookingId)).toHaveLength(1);
-    expect(transfersSentFor(booked.bookingId)).toHaveLength(1);
+    expect(await moneyMoved(booked.bookingId)).toEqual({ captures: 0, refunds: 0 });
   });
 
-  it("shows the driver a receipt", async () => {
+  it("shows the driver a receipt: the price paid, and the session as evidence", async () => {
     const response = await call("GET", `/bookings/${booked.bookingId}/receipt`, driver);
     expect(response.statusCode, response.body).toBe(200);
     expect(response.json()).toEqual({
       bookingId: booked.bookingId,
-      sessionId,
       role: "driver",
-      status: "paid",
-      sessionStatus: "reconciled",
+      bookingStatus: "completed",
       currency: "EUR",
-      startedAt: booked.slot.start.toISOString(),
-      stoppedAt: new Date(booked.slot.start.getTime() + 219 * MINUTE).toISOString(),
-      durationMinutes: 219,
-      billedMinutes: 220,
-      kwh: 22.5,
-      meter: { startKwh: 1, stopKwh: 23.5 },
+      start: booked.slot.start.toISOString(),
+      end: booked.slot.end.toISOString(),
+      bookedMinutes: 240,
       pricePerHourCents: 250,
-      quotedAmountCents: 1000,
-      lines: [{ kind: "time", description: "3 h 40 min at €2.50 an hour", amountCents: 917 }],
-      capNote: null,
-      totalCents: 917,
-      platformFeeCents: 0,
-      effectiveCentsPerKwh: 41,
+      paidCents: 1000,
+      refunds: [],
+      refundedCents: 0,
+      totalCents: 1000,
+      session: {
+        sessionId,
+        status: "reconciled",
+        startedAt: booked.slot.start.toISOString(),
+        stoppedAt: new Date(booked.slot.start.getTime() + 219 * MINUTE).toISOString(),
+        stopReason: "Remote",
+        kwh: 22.5,
+        meter: { startKwh: 1, stopKwh: 23.5 },
+        samples: [
+          {
+            at: new Date(booked.slot.start.getTime() + 60 * MINUTE).toISOString(),
+            registerKwh: 8,
+            kw: 7,
+          },
+          {
+            at: new Date(booked.slot.start.getTime() + 218 * MINUTE).toISOString(),
+            registerKwh: 23.4,
+            kw: 7,
+          },
+        ],
+      },
+      effectiveCentsPerKwh: 44,
       card: { brand: "visa", last4: "4242" },
-      hostPayout: null,
+      hostEarnings: null,
       review: null,
       canReview: true,
     });
   });
 
-  it("shows the host the payout instead of the card, and nobody else anything", async () => {
+  it("shows the host the card fee passed on and what they keep, and nobody else anything", async () => {
     const host = await call("GET", `/bookings/${booked.bookingId}/receipt`, hostCookie);
     expect(host.json()).toMatchObject({
       role: "host",
       card: null,
-      hostPayout: { amountCents: 917, status: "sent", holdReason: null },
+      hostEarnings: { grossCents: 1000, cardFeeCents: 40, platformFeeCents: 0, netCents: 960 },
       canReview: false,
     });
     const other = await call("GET", `/bookings/${booked.bookingId}/receipt`, stranger);
@@ -410,7 +393,7 @@ describe("reconciliation", () => {
     expect(receipt.json()).toMatchObject({ review: { rating: 4 }, canReview: false });
   });
 
-  it("has no receipt or review before the session stops", async () => {
+  it("has no receipt or review before the booking finishes", async () => {
     const pending = await book();
     expect(
       (await call("GET", `/bookings/${pending.bookingId}/receipt`, driver)).json(),
@@ -425,7 +408,7 @@ describe("reconciliation", () => {
       .where(eq(bookings.id, pending.bookingId));
   });
 
-  it("sends a session to review when the meter and the last MeterValue disagree by 0.5 kWh", async () => {
+  it("flags a meter that does not add up, and support refunds by hand", async () => {
     const mismatch = await book();
     const id = await insertSession(mismatch, {
       ...STOPPED_219,
@@ -436,45 +419,34 @@ describe("reconciliation", () => {
       status: "needs_review",
       reviewReason: "meter_mismatch",
     });
-    expect(await capturesOf(mismatch.bookingId)).toEqual([]);
-    expect(await paymentOf(mismatch.bookingId)).toMatchObject({ status: "authorised" });
-    expect(await transferOf(mismatch.bookingId)).toBeUndefined();
-    const receipt = await call("GET", `/bookings/${mismatch.bookingId}/receipt`, driver);
-    expect(receipt.json()).toMatchObject({ status: "needs_review", totalCents: 917 });
+    expect(await moneyMoved(mismatch.bookingId)).toEqual({ captures: 0, refunds: 0 });
 
-    // Support resolves it with an amount; only admins may.
-    const path = `/admin/sessions/${id}/resolve`;
-    expect((await call("POST", path, driver, { amountCents: 800 })).statusCode).toBe(403);
-    expect((await call("POST", path, stranger, { amountCents: 1001 })).statusCode).toBe(422);
-    const resolved = await call("POST", path, stranger, {
-      amountCents: 800,
-      note: "Meter checked",
+    // Support refunds part of it; only admins may, and never more than was paid.
+    const path = `/admin/bookings/${mismatch.bookingId}/refund`;
+    const note = "Charger stopped early; half refunded";
+    expect((await call("POST", path, driver, { amountCents: 500, note })).statusCode).toBe(403);
+    expect((await call("POST", path, stranger, { amountCents: 1001, note })).json()).toMatchObject({
+      code: "refund-too-large",
     });
-    expect(resolved.statusCode, resolved.body).toBe(200);
-    expect(await sessionRow(id)).toMatchObject({ status: "reconciled" });
-    expect(await capturesOf(mismatch.bookingId)).toEqual([
-      expect.objectContaining({ amount: 800 }),
+    const refunded = await call("POST", path, stranger, { amountCents: 500, note });
+    expect(refunded.statusCode, refunded.body).toBe(201);
+    expect(refunded.json()).toMatchObject({ amountCents: 500, status: "succeeded" });
+    expect(await refundsOf(mismatch.bookingId)).toMatchObject([
+      { amountCents: 500, reason: "support", note, issuedById: admins[0] },
     ]);
-    expect(await transferOf(mismatch.bookingId)).toMatchObject({
-      status: "sent",
-      amountCents: 800,
-    });
-    expect((await call("POST", path, stranger, { amountCents: 800 })).statusCode).toBe(409);
-    const adjusted = await call("GET", `/bookings/${mismatch.bookingId}/receipt`, driver);
-    expect(adjusted.json()).toMatchObject({
-      status: "paid",
-      totalCents: 800,
-      lines: [
-        { kind: "time", amountCents: 917 },
-        { kind: "adjustment", amountCents: -117 },
-      ],
+    expect((await call("POST", path, stranger, { amountCents: 501, note })).statusCode).toBe(422);
+    const receipt = await call("GET", `/bookings/${mismatch.bookingId}/receipt`, hostCookie);
+    expect(receipt.json()).toMatchObject({
+      refundedCents: 500,
+      totalCents: 500,
+      hostEarnings: { grossCents: 500, cardFeeCents: 20, netCents: 480 },
     });
   });
 });
 
 describe("a session without a StopTransaction", () => {
   /** An open session whose slot has ended, with meter values up to 3 h 30 min. */
-  async function abandoned(): Promise<{ booked: Booked; sessionId: string }> {
+  async function abandoned(lastEnergyWh = 26_000): Promise<{ booked: Booked; sessionId: string }> {
     clock.current = new Date();
     const booked = await book();
     const sessionId = await insertSession(booked, {
@@ -483,13 +455,13 @@ describe("a session without a StopTransaction", () => {
       meterStartWh: 5_000,
       samples: [
         { minute: 30, energyWh: 8_500 },
-        { minute: 210, energyWh: 26_000 },
+        { minute: 210, energyWh: lastEnergyWh },
       ],
     });
     return { booked, sessionId };
   }
 
-  it("is closed from the last MeterValue 10 minutes after the slot and flagged for the host", async () => {
+  it("is closed from the last MeterValue 10 minutes after the slot, with its energy recorded", async () => {
     const { booked, sessionId } = await abandoned();
     clock.current = new Date(booked.slot.end.getTime() + 9 * MINUTE);
     await h.jobs.runNow(settlementSweepJob, {});
@@ -497,99 +469,24 @@ describe("a session without a StopTransaction", () => {
     expect((await sessionRow(sessionId)).status).toBe("charging");
 
     clock.current = new Date(booked.slot.end.getTime() + 11 * MINUTE);
-    const mailBefore = h.mail.emails.length;
     await h.jobs.runNow(settlementSweepJob, {});
     await h.jobs.drain();
-    const lastTs = new Date(booked.slot.start.getTime() + 210 * MINUTE);
     expect(await sessionRow(sessionId)).toMatchObject({
-      status: "needs_host_confirmation",
-      reviewReason: "missing_stop",
+      status: "reconciled",
+      stopReason: "NoStopTransaction",
       meterStopWh: 26_000,
       kwh: 21,
-      stoppedAt: lastTs,
-      confirmationDueAt: new Date(clock.current.getTime() + 72 * HOUR),
+      stoppedAt: new Date(booked.slot.start.getTime() + 210 * MINUTE),
     });
     const [booking] = await h.database.db
       .select({ status: bookings.status })
       .from(bookings)
       .where(eq(bookings.id, booked.bookingId));
     expect(booking?.status).toBe("completed");
-    const mail = h.mail.emails.slice(mailBefore);
-    expect(mail.map((message) => message.to).sort()).toEqual([
-      "cian@example.com",
-      "niamh@example.com",
-    ]);
-    expect(mail.find((message) => message.to === "niamh@example.com")?.text).toContain("21.0 kWh");
-    expect(await capturesOf(booked.bookingId)).toEqual([]);
+    expect(await moneyMoved(booked.bookingId)).toEqual({ captures: 0, refunds: 0 });
     expect(
       (await call("GET", `/bookings/${booked.bookingId}/receipt`, driver)).json(),
-    ).toMatchObject({ status: "awaiting_host_confirmation", billedMinutes: 210, totalCents: 875 });
-
-    // Only the host can confirm; then it is captured.
-    const path = `/hosts/sessions/${sessionId}/confirm`;
-    expect((await call("POST", path, driver)).statusCode).toBe(404);
-    const confirmed = await call("POST", path, hostCookie);
-    expect(confirmed.statusCode, confirmed.body).toBe(202);
-    await h.jobs.drain();
-    expect(await sessionRow(sessionId)).toMatchObject({ status: "reconciled" });
-    expect(await capturesOf(booked.bookingId)).toEqual([expect.objectContaining({ amount: 875 })]);
-    expect(await transferOf(booked.bookingId)).toMatchObject({ status: "sent", amountCents: 875 });
-    expect((await call("POST", path, hostCookie)).statusCode).toBe(409);
-  });
-
-  it("is captured after 72 hours when the host does not answer", async () => {
-    const { booked, sessionId } = await abandoned();
-    clock.current = new Date(booked.slot.end.getTime() + 11 * MINUTE);
-    await h.jobs.runNow(settlementSweepJob, {});
-    await h.jobs.drain();
-    expect((await sessionRow(sessionId)).status).toBe("needs_host_confirmation");
-
-    clock.current = new Date(clock.current.getTime() + 71 * HOUR);
-    await h.jobs.runNow(confirmationTimeoutJob, { sessionId });
-    expect((await sessionRow(sessionId)).status).toBe("needs_host_confirmation");
-    expect(await capturesOf(booked.bookingId)).toEqual([]);
-
-    clock.current = new Date(clock.current.getTime() + 1 * HOUR + MINUTE);
-    await h.jobs.runNow(confirmationTimeoutJob, { sessionId });
-    expect(await sessionRow(sessionId)).toMatchObject({ status: "reconciled" });
-    expect(await capturesOf(booked.bookingId)).toEqual([expect.objectContaining({ amount: 875 })]);
-  });
-
-  it("goes to support when the host disputes it, and is not captured at 72 hours", async () => {
-    const { booked, sessionId } = await abandoned();
-    clock.current = new Date(booked.slot.end.getTime() + 11 * MINUTE);
-    await h.jobs.runNow(settlementSweepJob, {});
-    await h.jobs.drain();
-    const disputed = await call("POST", `/hosts/sessions/${sessionId}/dispute`, hostCookie, {
-      reason: "The car was still plugged in at 07:00",
-    });
-    expect(disputed.statusCode, disputed.body).toBe(201);
-    expect(await sessionRow(sessionId)).toMatchObject({
-      status: "needs_review",
-      reviewReason: "host_dispute",
-    });
-    const [dispute] = await h.database.db
-      .select()
-      .from(disputes)
-      .where(eq(disputes.bookingId, booked.bookingId));
-    expect(dispute).toMatchObject({ status: "open", raisedById: hostUserId });
-
-    clock.current = new Date(clock.current.getTime() + 73 * HOUR);
-    await h.jobs.runNow(confirmationTimeoutJob, { sessionId });
-    expect((await sessionRow(sessionId)).status).toBe("needs_review");
-    expect(await capturesOf(booked.bookingId)).toEqual([]);
-
-    const resolved = await call("POST", `/admin/sessions/${sessionId}/resolve`, stranger, {
-      amountCents: 1000,
-      note: "Host's account accepted",
-    });
-    expect(resolved.statusCode, resolved.body).toBe(200);
-    const [closed] = await h.database.db
-      .select()
-      .from(disputes)
-      .where(eq(disputes.bookingId, booked.bookingId));
-    expect(closed).toMatchObject({ status: "resolved", resolution: "Host's account accepted" });
-    expect(await transferOf(booked.bookingId)).toMatchObject({ status: "sent", amountCents: 1000 });
+    ).toMatchObject({ totalCents: 1000, session: { kwh: 21, stopReason: "NoStopTransaction" } });
   });
 });
 
@@ -606,133 +503,88 @@ describe("an arrival that never got a session", () => {
 
   const statusOf = async (bookingId: string) => {
     const [row] = await h.database.db
-      .select({ status: bookings.status, fee: bookings.cancellationFeeCents })
+      .select({ status: bookings.status })
       .from(bookings)
       .where(eq(bookings.id, bookingId));
-    return row;
+    return row?.status;
   };
 
-  it("is a no-show, paying one hour, when the driver never plugged in", async () => {
+  it("is a no-show, not refunded, when the driver never plugged in", async () => {
     const booked = await arrivedBooking();
     clock.current = new Date(booked.slot.end.getTime() + 11 * MINUTE);
     await h.jobs.runNow(settlementSweepJob, {});
     await h.jobs.drain();
-    expect(await statusOf(booked.bookingId)).toEqual({ status: "no_show", fee: 250 });
-    expect(await capturesOf(booked.bookingId)).toEqual([expect.objectContaining({ amount: 250 })]);
-    expect(await transferOf(booked.bookingId)).toMatchObject({ status: "sent", amountCents: 250 });
+    expect(await statusOf(booked.bookingId)).toBe("no_show");
+    expect(await refundsOf(booked.bookingId)).toEqual([]);
   });
 
-  it("is completed with nothing billed when a start was tried", async () => {
+  it("is refunded in full, automatically, when the charger never started", async () => {
     const booked = await arrivedBooking();
     await h.database.db.insert(sessions).values({
       bookingId: booked.bookingId,
       status: "failed",
-      stopReason: "no_start_transaction",
+      stopReason: "start_timeout",
     });
     clock.current = new Date(booked.slot.end.getTime() + 11 * MINUTE);
     await h.jobs.runNow(settlementSweepJob, {});
     await h.jobs.drain();
-    expect(await statusOf(booked.bookingId)).toEqual({ status: "completed", fee: 0 });
-    expect(await capturesOf(booked.bookingId)).toEqual([]);
-    expect(await paymentOf(booked.bookingId)).toMatchObject({ status: "cancelled" });
-  });
-});
-
-describe("held transfers", () => {
-  it("holds a transfer for incomplete tax details until the host saves them", async () => {
-    clock.current = new Date();
-    await h.database.db
-      .update(hosts)
-      .set({ taxDetailsComplete: false })
-      .where(eq(hosts.id, hostId));
-    const booked = await book();
-    const sessionId = await insertSession(booked, STOPPED_219);
-    await h.jobs.runNow(reconcileSessionJob, { sessionId });
-    expect(await sessionRow(sessionId)).toMatchObject({ status: "reconciled" });
-    expect(await transferOf(booked.bookingId)).toMatchObject({
-      status: "held",
-      holdReason: "tax_details_incomplete",
-    });
-    expect(transfersSentFor(booked.bookingId)).toEqual([]);
-    expect(
-      (await call("GET", `/bookings/${booked.bookingId}/receipt`, hostCookie)).json(),
-    ).toMatchObject({ hostPayout: { status: "held", holdReason: "tax_details_incomplete" } });
-
-    const saved = await call("PUT", "/hosts/me/tax-details", hostCookie, {
-      type: "individual",
-      legalName: "Niamh Byrne",
-      dateOfBirth: "1988-03-02",
-      address: {
-        line1: "7 Test Row",
-        city: "Dublin",
-        region: "Co. Dublin",
-        postalCode: "D06 X000",
-        country: "ie",
-      },
-      taxCountry: "IE",
-      tin: "1234567 fa",
-    });
-    expect(saved.statusCode, saved.body).toBe(200);
-    await h.jobs.drain();
-    expect(await transferOf(booked.bookingId)).toMatchObject({ status: "sent", holdReason: null });
-    expect(transfersSentFor(booked.bookingId)).toHaveLength(1);
-  });
-
-  it("releases transfers held for payouts once Stripe enables them", async () => {
-    await h.database.db.update(hosts).set({ payoutStatus: "pending" }).where(eq(hosts.id, hostId));
-    const booked = await book();
-    const sessionId = await insertSession(booked, STOPPED_219);
-    await h.jobs.runNow(reconcileSessionJob, { sessionId });
-    expect(await transferOf(booked.bookingId)).toMatchObject({
-      status: "held",
-      holdReason: "payouts_not_enabled",
-    });
-    // Nothing to release while payouts are still off.
+    expect(await statusOf(booked.bookingId)).toBe("completed");
+    expect(await refundsOf(booked.bookingId)).toMatchObject([
+      { amountCents: 1000, reason: "charger_fault", status: "succeeded" },
+    ]);
+    expect(await moneyMoved(booked.bookingId)).toEqual({ captures: 0, refunds: 1 });
+    // Running the sweep again refunds nothing more.
     await h.jobs.runNow(settlementSweepJob, {});
     await h.jobs.drain();
-    expect(await transferOf(booked.bookingId)).toMatchObject({ status: "held" });
-
-    const payload = JSON.stringify({
-      id: `evt_${randomBytes(6).toString("hex")}`,
-      object: "event",
-      type: "account.updated",
-      data: {
-        object: {
-          id: "acct_host_1",
-          payouts_enabled: true,
-          charges_enabled: true,
-          capabilities: { transfers: "active" },
-        },
-      },
-    });
-    const webhook = await h.app.inject({
-      method: "POST",
-      url: "/webhooks/stripe",
-      headers: {
-        "content-type": "application/json",
-        "stripe-signature": Stripe.webhooks.generateTestHeaderString({
-          payload,
-          secret: WEBHOOK_SECRET,
-        }),
-      },
-      payload,
-    });
-    expect(webhook.json()).toEqual({ received: true, outcome: "processed" });
-    await h.jobs.drain();
-    expect(await transferOf(booked.bookingId)).toMatchObject({ status: "sent" });
-    expect(transfersSentFor(booked.bookingId)).toHaveLength(1);
+    expect(await moneyMoved(booked.bookingId)).toEqual({ captures: 0, refunds: 1 });
   });
 });
 
-describe("weekly payout summary", () => {
-  it("emails the host the week's sessions, amounts and held transfers", async () => {
-    clock.current = new Date(nightIn(1).getTime() + 7 * HOUR);
-    const before = h.mail.emails.length;
-    await h.jobs.runNow(weeklyPayoutSummaryJob, {});
-    await h.jobs.drain();
-    const summary = h.mail.emails.slice(before).find((mail) => mail.to === "niamh@example.com");
-    expect(summary?.subject).toMatch(/^Your payouts for /);
-    expect(summary?.text).toContain("€9.17");
-    expect(summary?.text).toContain("paid out");
+describe("the sweep", () => {
+  it("queues a lifecycle job that went missing, once it is due", async () => {
+    clock.current = new Date();
+    const booked = await book();
+    // The no-show job was lost (a crash between the commit and the queue).
+    await h.database.db.execute(
+      sql`delete from pgboss.job where data->>'bookingId' = ${booked.bookingId}`,
+    );
+    clock.current = new Date(booked.slot.end.getTime() + 16 * MINUTE);
+    try {
+      await h.jobs.runNow(settlementSweepJob, {});
+      await h.jobs.drain();
+    } finally {
+      clock.current = new Date();
+    }
+    const [row] = await h.database.db
+      .select({ status: bookings.status })
+      .from(bookings)
+      .where(eq(bookings.id, booked.bookingId));
+    expect(row?.status).toBe("no_show");
+  });
+
+  it("resumes a charge whose outcome was never recorded, with the same idempotency key", async () => {
+    clock.current = new Date();
+    const booked = await book();
+    const before = await paymentOf(booked.bookingId);
+    // As if Stripe's answer was lost: the row still says pending.
+    await h.database.db
+      .update(payments)
+      .set({ status: "pending", stripePaymentIntentId: null, stripeChargeId: null })
+      .where(eq(payments.id, before.id));
+    const created = h.stripeMock.created.length;
+    clock.current = new Date(Date.now() + 3 * MINUTE);
+    try {
+      await h.jobs.runNow(settlementSweepJob, {});
+      await h.jobs.drain();
+    } finally {
+      clock.current = new Date();
+    }
+    const after = await paymentOf(booked.bookingId);
+    expect(after).toMatchObject({
+      status: "paid",
+      stripePaymentIntentId: before.stripePaymentIntentId,
+    });
+    // The replayed request made no new PaymentIntent.
+    expect(h.stripeMock.created.length).toBe(created);
   });
 });

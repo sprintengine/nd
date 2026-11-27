@@ -6,11 +6,12 @@ import { sql } from "drizzle-orm";
 // and Monday-to-Sunday weeks in the host's time zone (their first charger's),
 // and a booking counts in the period its slot starts in.
 //
-// Earnings are the host's share of captured payments: the transfer amount
-// once one exists (sent, pending, held or failed and awaiting a retry), or
-// the capture less the platform fee before it does; reversed transfers do not
-// count. Sessions are those that finished charging (stopped, reconciled, or
-// waiting for review or the host's confirmation); kWh is their total.
+// Earnings come from paid bookings (destination charges): the gross is what
+// the driver paid less refunds, and the host keeps the gross less the card
+// fee passed on to them and any platform fee, each shrunk in proportion to
+// what was refunded (as `hostEarnings` in @nd/domain computes it). Sessions
+// are those that finished charging (stopped, reconciled or under review);
+// kWh is their total.
 
 /** The host, their time zone and the currency they are paid in. */
 export async function dashboardHost(db: Executor, userId: string) {
@@ -32,6 +33,10 @@ export type DashboardHost = NonNullable<Awaited<ReturnType<typeof dashboardHost>
 export interface PeriodTotals {
   /** First day of the period, `YYYY-MM-DD` in the host's time zone. */
   readonly start: string;
+  /** Paid less refunds. */
+  readonly grossCents: number;
+  readonly cardFeeCents: number;
+  /** What the host keeps. */
   readonly earningsCents: number;
   readonly sessions: number;
   readonly kwh: number;
@@ -41,6 +46,8 @@ interface PeriodRow extends Record<string, unknown> {
   period: "month" | "week";
   idx: number;
   start: string;
+  gross_cents: string | number;
+  card_fee_cents: string | number;
   earnings_cents: string | number;
   sessions: string | number;
   kwh: string | number;
@@ -74,13 +81,17 @@ export async function dashboardTotals(
     ),
     earned as (
       select lower(b.slot) as start_at,
-        coalesce(t.amount_cents, p.captured_cents - p.platform_fee_cents) as cents
+        p.amount_cents - coalesce(r.cents, 0) as gross,
+        p.card_fee_cents * (p.amount_cents - coalesce(r.cents, 0)) / nullif(p.amount_cents, 0) as card_fee,
+        p.platform_fee_cents * (p.amount_cents - coalesce(r.cents, 0)) / nullif(p.amount_cents, 0) as platform_fee
       from bookings b
       join chargers c on c.id = b.charger_id
-      join payments p on p.booking_id = b.id and p.status = 'captured'
-      left join transfers t on t.payment_id = p.id
+      join payments p on p.booking_id = b.id and p.status = 'paid'
+      left join (
+        select payment_id, sum(amount_cents) as cents from refunds
+        where status <> 'failed' group by payment_id
+      ) r on r.payment_id = p.id
       where c.host_id = ${host.id} and p.currency = ${host.currency}
-        and (t.status is null or t.status <> 'reversed')
     ),
     finished as (
       select lower(b.slot) as start_at, coalesce(s.kwh, 0) as kwh
@@ -88,10 +99,14 @@ export async function dashboardTotals(
       join bookings b on b.id = s.booking_id
       join chargers c on c.id = b.charger_id
       where c.host_id = ${host.id}
-        and s.status in ('stopped', 'needs_review', 'needs_host_confirmation', 'reconciled')
+        and s.status in ('stopped', 'needs_review', 'reconciled')
     )
     select b.period, b.idx, b.start,
-      coalesce((select sum(e.cents) from earned e
+      coalesce((select sum(e.gross) from earned e
+        where e.start_at >= b.from_at and e.start_at < b.to_at), 0) as gross_cents,
+      coalesce((select sum(coalesce(e.card_fee, 0)) from earned e
+        where e.start_at >= b.from_at and e.start_at < b.to_at), 0) as card_fee_cents,
+      coalesce((select sum(e.gross - coalesce(e.card_fee, 0) - coalesce(e.platform_fee, 0)) from earned e
         where e.start_at >= b.from_at and e.start_at < b.to_at), 0) as earnings_cents,
       (select count(*) from finished f
         where f.start_at >= b.from_at and f.start_at < b.to_at) as sessions,
@@ -102,6 +117,8 @@ export async function dashboardTotals(
   `);
   const totals = (row: PeriodRow): PeriodTotals => ({
     start: row.start,
+    grossCents: Number(row.gross_cents),
+    cardFeeCents: Number(row.card_fee_cents),
     earningsCents: Number(row.earnings_cents),
     sessions: Number(row.sessions),
     kwh: roundKwh(row.kwh),

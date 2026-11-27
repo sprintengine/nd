@@ -335,7 +335,7 @@ describe("the notify job", () => {
     expect(left).toEqual([]);
   });
 
-  it("tells the host what settlement billed, once for both the settlement and the fallback", async () => {
+  it("tells the host what the guest paid and what they keep, once for both the settlement and the fallback", async () => {
     const bookingId = await newBooking("completed");
     const [session] = await h.database.db
       .insert(sessions)
@@ -344,15 +344,15 @@ describe("the notify job", () => {
     const sessionId = session?.id ?? "";
     await h.database.db.insert(payments).values({
       bookingId,
-      status: "captured",
-      authorisedCents: 2000,
-      capturedCents: 1875,
+      status: "paid",
+      amountCents: 1875,
+      cardFeeCents: 54,
       platformFeeCents: 0,
     });
     await h.jobs.runNow(notifyJob, { type: "session_settled", bookingId, sessionId });
     await h.jobs.runNow(notifyJob, { type: "session_ended", bookingId, sessionId });
     expect(sentTo(HOST_TOKEN).map((push) => push.message.body)).toEqual([
-      "Your guest was billed €18.75 for 8.4 kWh. You earn €18.75.",
+      "Your guest paid €18.75 and charged 8.4 kWh. You receive €18.21 after card fees.",
     ]);
   });
 

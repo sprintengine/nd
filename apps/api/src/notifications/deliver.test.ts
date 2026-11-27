@@ -152,7 +152,7 @@ describe("deliverNotifications", () => {
       sessionId: SESSION_ID,
     });
     expect(t.push.sent[0]?.message.body).toBe(
-      "Your guest was billed €16.00 for 7.2 kWh. You earn €15.00.",
+      "Your guest paid €16.00 and charged 7.2 kWh. You receive €15.00 after card fees.",
     );
     expect(data.settledAmounts).toHaveBeenCalledWith(expect.anything(), BOOKING_ID);
   });

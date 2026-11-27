@@ -26,13 +26,12 @@ export const notificationTriggerSchema = z.discriminatedUnion("type", [
   sessionTrigger("session_started"),
   /** StopTransaction: the driver hears at once. */
   sessionTrigger("session_stopped"),
-  /** Reconciliation captured the session: the host hears what they earned. */
+  /** Reconciliation recorded the session's energy: the host hears what they earned. */
   sessionTrigger("session_settled"),
   /**
    * The host's fallback, a while after the stop: "ended" without an amount
-   * when reconciliation has not settled the session by then (review, waiting
-   * for the host). Shares its ledger entry with `session_settled`, so the host
-   * hears once.
+   * when reconciliation has not settled the session by then (under review).
+   * Shares its ledger entry with `session_settled`, so the host hears once.
    */
   sessionTrigger("session_ended"),
   sessionTrigger("start_failed"),

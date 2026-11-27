@@ -25,7 +25,14 @@ const item = {
   driverFirstName: "Niamh",
   vehiclePlate: "231-D-1234",
 };
-const period = (start: string) => ({ start, earningsCents: 0, sessions: 0, kwh: 0 });
+const period = (start: string) => ({
+  start,
+  grossCents: 0,
+  cardFeeCents: 0,
+  earningsCents: 0,
+  sessions: 0,
+  kwh: 0,
+});
 
 let app: FastifyInstance;
 beforeEach(() => {
@@ -44,7 +51,14 @@ const get = (url: string) => app.inject({ method: "GET", url, headers: SESSION_C
 describe("GET /hosts/dashboard", () => {
   it("puts the totals, cards and lists together", async () => {
     vi.mocked(data.dashboardTotals).mockResolvedValue({
-      month: { start: "2027-01-01", earningsCents: 4200, sessions: 3, kwh: 21.5 },
+      month: {
+        start: "2027-01-01",
+        grossCents: 4400,
+        cardFeeCents: 200,
+        earningsCents: 4200,
+        sessions: 3,
+        kwh: 21.5,
+      },
       weeks: Array.from({ length: 8 }, (_v, index) => period(`2026-11-${String(16 + index)}`)),
     });
     vi.mocked(data.chargerCards).mockResolvedValue([
@@ -72,6 +86,8 @@ describe("GET /hosts/dashboard", () => {
     }>();
     expect(body.month).toEqual({
       start: "2027-01-01",
+      grossCents: 4400,
+      cardFeeCents: 200,
       earningsCents: 4200,
       sessions: 3,
       kwh: 21.5,

@@ -1,37 +1,22 @@
 import {
   bookings,
   chargers,
-  disputes,
   type Executor,
   hosts,
   meterValues,
   payments,
   reviews,
   sessions,
-  transfers,
   users,
 } from "@nd/db";
-import {
-  OPEN_SESSION_STATUSES,
-  type SessionReviewReason,
-  type SessionStatus,
-  type TransferHoldReason,
-} from "@nd/domain";
-import { and, asc, desc, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
+import type { SessionReviewReason, SessionStatus } from "@nd/domain";
+import { and, asc, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
-// Reads and writes behind reconciliation, host confirmation, receipts,
-// reviews and payout summaries. Integration tests cover them against
-// Postgres; unit tests mock this module.
+// Reads and writes behind closing sessions, receipts and reviews.
+// Integration tests cover them against Postgres; unit tests mock this module.
 
 const hostUsers = alias(users, "host_users");
-
-/** Session statuses that keep a host's transfer held (see `transferHoldReason`). */
-const UNSETTLED_SESSION_STATUSES = [
-  ...OPEN_SESSION_STATUSES,
-  "needs_review",
-  "needs_host_confirmation",
-] as const satisfies readonly SessionStatus[];
 
 /** A session with its booking, charger, both parties, payment and last meter value. */
 export async function findSettlementSession(db: Executor, sessionId: string) {
@@ -88,8 +73,6 @@ export interface SessionChange {
   readonly kwh?: number;
   readonly stoppedAt?: Date;
   readonly stopReason?: string;
-  readonly confirmationDueAt?: Date;
-  readonly hostConfirmedAt?: Date;
   readonly reconciledAt?: Date;
 }
 
@@ -108,30 +91,12 @@ export async function updateSessionFrom(
   return rows.length > 0;
 }
 
-/**
- * Sessions ready to bill: stopped, or closed without a stop and confirmed by
- * the host or past their confirmation deadline.
- */
-export async function sessionsToReconcile(
-  db: Executor,
-  now: Date,
-  limit: number,
-): Promise<string[]> {
+/** Stopped sessions whose meter has not been checked yet, oldest stop first. */
+export async function sessionsToReconcile(db: Executor, limit: number): Promise<string[]> {
   const rows = await db
     .select({ id: sessions.id })
     .from(sessions)
-    .where(
-      or(
-        eq(sessions.status, "stopped"),
-        and(
-          eq(sessions.status, "needs_host_confirmation"),
-          or(
-            isNotNull(sessions.hostConfirmedAt),
-            sql`${sessions.confirmationDueAt} <= ${now.toISOString()}::timestamptz`,
-          ),
-        ),
-      ),
-    )
+    .where(eq(sessions.status, "stopped"))
     .orderBy(asc(sessions.stoppedAt))
     .limit(limit);
   return rows.map((row) => row.id);
@@ -190,90 +155,7 @@ export async function hasAnySession(db: Executor, bookingId: string): Promise<bo
   return rows.length > 0;
 }
 
-/** Captured payments of reconciled sessions that have no transfer row yet. */
-export async function capturedWithoutTransfer(db: Executor, limit: number): Promise<string[]> {
-  const rows = await db
-    .selectDistinct({ id: payments.id })
-    .from(payments)
-    .innerJoin(sessions, eq(sessions.bookingId, payments.bookingId))
-    .leftJoin(transfers, eq(transfers.paymentId, payments.id))
-    .where(
-      and(
-        eq(payments.status, "captured"),
-        sql`${payments.capturedCents} > 0`,
-        eq(sessions.status, "reconciled"),
-        sql`${transfers.id} is null`,
-      ),
-    )
-    .limit(limit);
-  return rows.map((row) => row.id);
-}
-
-/**
- * Held transfers whose hold reason has cleared: payouts are now enabled, the
- * session is settled, or the dispute is closed. Optionally only one host's.
- * (Saving tax details re-sends transfers held for them; see tax-details.)
- */
-export async function releasableHeldTransfers(
-  db: Executor,
-  options: { hostId?: string; limit: number },
-): Promise<{ paymentId: string; hostId: string }[]> {
-  const unsettledSession = sql`exists (select 1 from ${sessions} where ${sessions.bookingId} = ${bookings.id} and ${inArray(sessions.status, [...UNSETTLED_SESSION_STATUSES])})`;
-  const openDispute = sql`exists (select 1 from ${disputes} where ${disputes.bookingId} = ${bookings.id} and ${inArray(disputes.status, ["open", "under_review"])})`;
-  return db
-    .select({ paymentId: transfers.paymentId, hostId: hosts.id })
-    .from(transfers)
-    .innerJoin(payments, eq(payments.id, transfers.paymentId))
-    .innerJoin(bookings, eq(bookings.id, payments.bookingId))
-    .innerJoin(chargers, eq(chargers.id, bookings.chargerId))
-    .innerJoin(hosts, eq(hosts.id, chargers.hostId))
-    .where(
-      and(
-        eq(transfers.status, "held"),
-        options.hostId === undefined ? undefined : eq(hosts.id, options.hostId),
-        or(
-          and(
-            eq(transfers.holdReason, "payouts_not_enabled"),
-            eq(hosts.payoutStatus, "enabled"),
-            isNotNull(hosts.stripeAccountId),
-          ),
-          and(eq(transfers.holdReason, "session_needs_review"), sql`not ${unsettledSession}`),
-          and(eq(transfers.holdReason, "dispute_open"), sql`not ${openDispute}`),
-        ),
-      ),
-    )
-    .orderBy(asc(transfers.createdAt))
-    .limit(options.limit);
-}
-
-/** Records a dispute on a booking. */
-export async function insertDispute(
-  db: Executor,
-  values: { bookingId: string; raisedById: string; reason: string; details: string | null },
-): Promise<string> {
-  const [row] = await db.insert(disputes).values(values).returning({ id: disputes.id });
-  if (row === undefined) throw new Error("dispute not inserted");
-  return row.id;
-}
-
-/** Closes a booking's open disputes as resolved. Resolves to how many. */
-export async function resolveOpenDisputes(
-  db: Executor,
-  bookingId: string,
-  resolution: string,
-  at: Date,
-): Promise<number> {
-  const rows = await db
-    .update(disputes)
-    .set({ status: "resolved", resolution, resolvedAt: at })
-    .where(
-      and(eq(disputes.bookingId, bookingId), inArray(disputes.status, ["open", "under_review"])),
-    )
-    .returning({ id: disputes.id });
-  return rows.length;
-}
-
-/** The session a booking was billed for: its latest one that did not fail to start. */
+/** The session a booking charged in: its latest one that did not fail to start. */
 export async function billedSessionOf(db: Executor, bookingId: string) {
   const [row] = await db
     .select()
@@ -320,95 +202,12 @@ export async function insertReview(
   return rows.length > 0;
 }
 
-/** Hosts with a session stopped in the window or a transfer still held. */
-export async function hostsWithPayoutActivity(
-  db: Executor,
-  window: { start: Date; end: Date },
-): Promise<string[]> {
-  const rows = await db
-    .selectDistinct({ id: hosts.id })
-    .from(hosts)
-    .innerJoin(chargers, eq(chargers.hostId, hosts.id))
-    .innerJoin(bookings, eq(bookings.chargerId, chargers.id))
-    .innerJoin(sessions, eq(sessions.bookingId, bookings.id))
-    .leftJoin(payments, eq(payments.bookingId, bookings.id))
-    .leftJoin(transfers, eq(transfers.paymentId, payments.id))
-    .where(
-      or(
-        and(
-          sql`${sessions.stoppedAt} >= ${window.start.toISOString()}::timestamptz`,
-          sql`${sessions.stoppedAt} < ${window.end.toISOString()}::timestamptz`,
-        ),
-        eq(transfers.status, "held"),
-      ),
-    );
-  return rows.map((row) => row.id);
-}
-
-/** One line of a host's payout summary. */
-export interface PayoutLine {
-  readonly bookingId: string;
-  readonly slot: { start: Date; end: Date };
-  readonly timezone: string;
-  readonly sessionStatus: SessionStatus;
-  readonly startedAt: Date | null;
-  readonly stoppedAt: Date | null;
-  readonly kwh: number | null;
-  readonly capturedCents: number | null;
-  readonly currency: "EUR" | "GBP";
-  readonly transferStatus: "pending" | "held" | "sent" | "failed" | "reversed" | null;
-  readonly transferCents: number | null;
-  readonly holdReason: TransferHoldReason | null;
-}
-
-/**
- * A host's sessions stopped in the window and every transfer of theirs still
- * held, with the host's name and email.
- */
-export async function hostPayoutSummary(
-  db: Executor,
-  hostId: string,
-  window: { start: Date; end: Date },
-) {
-  const [host] = await db
-    .select({ id: hosts.id, name: users.name, email: users.email })
-    .from(hosts)
-    .innerJoin(users, eq(users.id, hosts.userId))
-    .where(eq(hosts.id, hostId))
-    .limit(1);
-  if (host === undefined) return undefined;
-  const lines: PayoutLine[] = await db
-    .select({
-      bookingId: bookings.id,
-      slot: bookings.slot,
-      timezone: chargers.timezone,
-      sessionStatus: sessions.status,
-      startedAt: sessions.startedAt,
-      stoppedAt: sessions.stoppedAt,
-      kwh: sessions.kwh,
-      capturedCents: payments.capturedCents,
-      currency: bookings.currency,
-      transferStatus: transfers.status,
-      transferCents: transfers.amountCents,
-      holdReason: transfers.holdReason,
-    })
-    .from(sessions)
-    .innerJoin(bookings, eq(bookings.id, sessions.bookingId))
-    .innerJoin(chargers, eq(chargers.id, bookings.chargerId))
-    .leftJoin(payments, eq(payments.bookingId, bookings.id))
-    .leftJoin(transfers, eq(transfers.paymentId, payments.id))
-    .where(
-      and(
-        eq(chargers.hostId, hostId),
-        or(
-          and(
-            sql`${sessions.stoppedAt} >= ${window.start.toISOString()}::timestamptz`,
-            sql`${sessions.stoppedAt} < ${window.end.toISOString()}::timestamptz`,
-          ),
-          eq(transfers.status, "held"),
-        ),
-      ),
-    )
-    .orderBy(asc(sql`lower(${bookings.slot})`));
-  return { host, lines };
+/** A session's meter samples, oldest first, at most `limit`: evidence of what the charger did. */
+export async function meterSamples(db: Executor, sessionId: string, limit: number) {
+  return db
+    .select({ ts: meterValues.ts, energyWh: meterValues.energyWh, powerW: meterValues.powerW })
+    .from(meterValues)
+    .where(eq(meterValues.sessionId, sessionId))
+    .orderBy(asc(meterValues.ts), asc(meterValues.id))
+    .limit(limit);
 }

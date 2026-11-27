@@ -129,7 +129,7 @@ export function messageFor(
         const energy = kwh === null ? "" : ` (${formatKwh(kwh)})`;
         return {
           title: "Session ended",
-          body: `Your guest's session has ended${energy}. Your earnings show once it is settled.`,
+          body: `Your guest's session has ended${energy}.`,
           data: bookingData,
         };
       }
@@ -137,7 +137,7 @@ export function messageFor(
       const earned = formatMoney(settled.earningsCents, settled.currency);
       return {
         title: "Session ended",
-        body: `Your guest was billed ${billed}${kwh === null ? "" : ` for ${formatKwh(kwh)}`}. You earn ${earned}.`,
+        body: `Your guest paid ${billed}${kwh === null ? "" : ` and charged ${formatKwh(kwh)}`}. You receive ${earned} after card fees.`,
         data: bookingData,
       };
     }

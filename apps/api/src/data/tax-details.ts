@@ -1,13 +1,4 @@
-import {
-  bookings,
-  chargers,
-  type Db,
-  type Executor,
-  hosts,
-  hostTaxDetails,
-  payments,
-  transfers,
-} from "@nd/db";
+import { type Db, type Executor, hosts, hostTaxDetails } from "@nd/db";
 import type { TaxCountry, TaxEntityType } from "@nd/domain";
 import { and, eq, ne } from "drizzle-orm";
 
@@ -108,24 +99,6 @@ export async function saveTaxDetails(
       .onConflictDoUpdate({ target: hostTaxDetails.hostId, set: values });
     await tx.update(hosts).set({ taxDetailsComplete: true }).where(eq(hosts.id, hostId));
   });
-}
-
-/** Payments whose transfer to the host is held only for missing tax details. */
-export async function paymentsHeldForTaxDetails(db: Executor, hostId: string): Promise<string[]> {
-  const rows = await db
-    .select({ paymentId: transfers.paymentId })
-    .from(transfers)
-    .innerJoin(payments, eq(payments.id, transfers.paymentId))
-    .innerJoin(bookings, eq(bookings.id, payments.bookingId))
-    .innerJoin(chargers, eq(chargers.id, bookings.chargerId))
-    .where(
-      and(
-        eq(chargers.hostId, hostId),
-        eq(transfers.status, "held"),
-        eq(transfers.holdReason, "tax_details_incomplete"),
-      ),
-    );
-  return rows.map((row) => row.paymentId);
 }
 
 /**

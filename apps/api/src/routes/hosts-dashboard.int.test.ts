@@ -6,11 +6,11 @@ import {
   type Executor,
   hosts,
   payments,
+  refunds,
   sessions,
-  transfers,
   users,
 } from "@nd/db";
-import type { BookingStatus, SessionStatus, TransferStatus } from "@nd/domain";
+import { type BookingStatus, hostEarnings, type SessionStatus } from "@nd/domain";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -18,8 +18,8 @@ import { insertBooking, insertListedCharger } from "../../test/fixtures.ts";
 import { type Harness, startHarness } from "../../test/harness.ts";
 import { APP_ORIGIN } from "../../test/http.ts";
 
-// The host's dashboard against Postgres: totals equal a direct SQL sum over
-// seeded bookings, sessions, payments and transfers; the weekly series,
+// The host's dashboard against Postgres: totals equal the sum, worked out in
+// TypeScript, over seeded bookings, sessions, payments and refunds; the weekly series,
 // charger cards, tonight's and pending lists and the calendar; and switching
 // a listing off.
 
@@ -43,8 +43,14 @@ interface Seed {
   readonly start: string;
   readonly hours?: number;
   readonly status: BookingStatus;
-  readonly payment?: { captured: number; fee?: number; status?: "captured" | "authorised" };
-  readonly transfer?: { amount: number; status: TransferStatus };
+  readonly payment?: {
+    amount: number;
+    cardFee: number;
+    platformFee?: number;
+    status?: "paid" | "authorised";
+  };
+  /** Refunds of the payment: what was refunded, and whether it failed. */
+  readonly refunds?: { amount: number; status: "succeeded" | "pending" | "failed" }[];
   readonly session?: { status: SessionStatus; kwh: number | null };
 }
 
@@ -65,31 +71,29 @@ async function seed(db: Executor, row: Seed): Promise<void> {
       quotedAmountCents: 3000,
       pricePerHourCents: 250,
       vehiclePlate: "231-D-1234",
-      ...(row.status === "cancelled"
-        ? { cancelledAt: start, cancelledBy: "driver" as const, cancellationFeeCents: 0 }
-        : {}),
+      ...(row.status === "cancelled" ? { cancelledAt: start, cancelledBy: "driver" as const } : {}),
     })
     .returning({ id: bookings.id });
   if (booking === undefined) throw new Error("booking not inserted");
   ids[row.key] = booking.id;
   if (row.payment !== undefined) {
-    const status = row.payment.status ?? "captured";
     const [payment] = await db
       .insert(payments)
       .values({
         bookingId: booking.id,
-        status,
-        authorisedCents: 3000,
-        capturedCents: status === "captured" ? row.payment.captured : 0,
-        platformFeeCents: row.payment.fee ?? 0,
+        status: row.payment.status ?? "paid",
+        amountCents: row.payment.amount,
+        cardFeeCents: row.payment.cardFee,
+        platformFeeCents: row.payment.platformFee ?? 0,
       })
       .returning({ id: payments.id });
-    if (payment !== undefined && row.transfer !== undefined) {
-      await db.insert(transfers).values({
-        paymentId: payment.id,
-        amountCents: row.transfer.amount,
-        status: row.transfer.status,
-        holdReason: row.transfer.status === "held" ? "session_needs_review" : null,
+    for (const refund of row.refunds ?? []) {
+      await db.insert(refunds).values({
+        paymentId: payment?.id ?? "",
+        amountCents: refund.amount,
+        currency: "EUR",
+        reason: "support",
+        status: refund.status,
       });
     }
   }
@@ -155,8 +159,7 @@ beforeAll(async () => {
       chargerId: chargerA,
       start: "2027-03-02T22:00:00Z",
       status: "completed",
-      payment: { captured: 2000, fee: 100 },
-      transfer: { amount: 1900, status: "sent" },
+      payment: { amount: 2000, cardFee: 55, platformFee: 100 },
       session: { status: "reconciled", kwh: 10.5 },
     },
     {
@@ -164,7 +167,8 @@ beforeAll(async () => {
       chargerId: chargerA,
       start: "2027-03-16T22:00:00Z",
       status: "completed",
-      payment: { captured: 1500 },
+      payment: { amount: 1500, cardFee: 48 },
+      refunds: [{ amount: 100, status: "failed" }],
       session: { status: "stopped", kwh: 4.25 },
     },
     {
@@ -172,8 +176,7 @@ beforeAll(async () => {
       chargerId: chargerB,
       start: "2027-03-10T22:00:00Z",
       status: "completed",
-      payment: { captured: 1200 },
-      transfer: { amount: 1200, status: "held" },
+      payment: { amount: 1200, cardFee: 43 },
       session: { status: "needs_review", kwh: 3 },
     },
     {
@@ -181,8 +184,8 @@ beforeAll(async () => {
       chargerId: chargerA,
       start: "2027-03-05T22:00:00Z",
       status: "completed",
-      payment: { captured: 800 },
-      transfer: { amount: 800, status: "reversed" },
+      payment: { amount: 800, cardFee: 37 },
+      refunds: [{ amount: 800, status: "succeeded" }],
       session: { status: "reconciled", kwh: 2 },
     },
     {
@@ -190,15 +193,15 @@ beforeAll(async () => {
       chargerId: chargerA,
       start: "2027-03-08T22:00:00Z",
       status: "cancelled",
-      payment: { captured: 500 },
-      transfer: { amount: 500, status: "pending" },
+      payment: { amount: 500, cardFee: 33 },
+      refunds: [{ amount: 250, status: "pending" }],
     },
     {
       key: "b7",
       chargerId: chargerB,
       start: "2027-03-12T22:00:00Z",
       status: "completed",
-      payment: { captured: 0, status: "authorised" },
+      payment: { amount: 3000, cardFee: 70, status: "authorised" },
       session: { status: "failed", kwh: null },
     },
     // February, and 00:30 on 1 April in Dublin (still 31 March in UTC)
@@ -207,8 +210,7 @@ beforeAll(async () => {
       chargerId: chargerA,
       start: "2027-02-26T22:00:00Z",
       status: "completed",
-      payment: { captured: 3000 },
-      transfer: { amount: 3000, status: "sent" },
+      payment: { amount: 3000, cardFee: 70 },
       session: { status: "reconciled", kwh: 20 },
     },
     {
@@ -217,7 +219,7 @@ beforeAll(async () => {
       start: "2027-03-31T23:30:00Z",
       hours: 2,
       status: "completed",
-      payment: { captured: 700 },
+      payment: { amount: 700, cardFee: 36 },
       session: { status: "reconciled", kwh: 1 },
     },
     // Another host's
@@ -226,7 +228,7 @@ beforeAll(async () => {
       chargerId: otherCharger,
       start: "2027-03-03T22:00:00Z",
       status: "completed",
-      payment: { captured: 2999 },
+      payment: { amount: 2999, cardFee: 70 },
       session: { status: "reconciled", kwh: 9 },
     },
     // Tonight, in progress, pending and cancelled
@@ -235,7 +237,7 @@ beforeAll(async () => {
       chargerId: chargerA,
       start: "2027-03-18T22:00:00Z",
       status: "confirmed",
-      payment: { captured: 0, status: "authorised" },
+      payment: { amount: 3000, cardFee: 70, status: "authorised" },
     },
     {
       key: "b13",
@@ -257,22 +259,48 @@ afterAll(async () => {
 
 interface Period {
   start: string;
+  grossCents: number;
+  cardFeeCents: number;
   earningsCents: number;
   sessions: number;
   kwh: number;
 }
 
-/** The totals straight from the tables, for bookings of the host starting in [from, to). */
+/**
+ * The totals for bookings of the host starting in [from, to): each paid
+ * booking's earnings worked out by `hostEarnings`, session counts and kWh
+ * straight from the tables.
+ */
 async function directSums(from: string, to: string) {
-  const result = await h.database.db.execute<{ cents: string; sessions: string; kwh: string }>(sql`
+  const paid = await h.database.db.execute<{
+    amount: number;
+    platform: number;
+    card: number;
+    refunded: string;
+  }>(sql`
+    select p.amount_cents as amount, p.platform_fee_cents as platform, p.card_fee_cents as card,
+      (select coalesce(sum(r.amount_cents), 0) from refunds r
+        where r.payment_id = p.id and r.status <> 'failed') as refunded
+      from payments p join bookings b on b.id = p.booking_id
+     where b.charger_id in (${chargerA}, ${chargerB}) and p.status = 'paid'
+       and lower(b.slot) >= ${from}::timestamptz and lower(b.slot) < ${to}::timestamptz`);
+  const money = paid.rows
+    .map((row) =>
+      hostEarnings(
+        { amountCents: row.amount, platformFeeCents: row.platform, cardFeeCents: row.card },
+        Number(row.refunded),
+      ),
+    )
+    .reduce(
+      (sum, earned) => ({
+        grossCents: sum.grossCents + earned.grossCents,
+        cardFeeCents: sum.cardFeeCents + earned.cardFeeCents,
+        earningsCents: sum.earningsCents + earned.netCents,
+      }),
+      { grossCents: 0, cardFeeCents: 0, earningsCents: 0 },
+    );
+  const result = await h.database.db.execute<{ sessions: string; kwh: string }>(sql`
     select
-      (select coalesce(sum(coalesce(t.amount_cents, p.captured_cents - p.platform_fee_cents)), 0)
-        from payments p
-        join bookings b on b.id = p.booking_id
-        left join transfers t on t.payment_id = p.id
-        where b.charger_id in (${chargerA}, ${chargerB}) and p.status = 'captured'
-          and (t.status is null or t.status <> 'reversed')
-          and lower(b.slot) >= ${from}::timestamptz and lower(b.slot) < ${to}::timestamptz) as cents,
       (select count(*) from sessions s join bookings b on b.id = s.booking_id
         where b.charger_id in (${chargerA}, ${chargerB}) and s.stopped_at is not null
           and s.status <> 'failed'
@@ -282,11 +310,7 @@ async function directSums(from: string, to: string) {
           and lower(b.slot) >= ${from}::timestamptz and lower(b.slot) < ${to}::timestamptz) as kwh
   `);
   const row = result.rows[0];
-  return {
-    earningsCents: Number(row?.cents),
-    sessions: Number(row?.sessions),
-    kwh: Number(row?.kwh),
-  };
+  return { ...money, sessions: Number(row?.sessions), kwh: Number(row?.kwh) };
 }
 
 describe("GET /hosts/dashboard", () => {
@@ -298,8 +322,16 @@ describe("GET /hosts/dashboard", () => {
     // Dublin is on UTC until 28 March, then UTC+1: April starts at 23:00 UTC on the 31st.
     const direct = await directSums("2027-03-01T00:00:00Z", "2027-03-31T23:00:00Z");
     expect(body.month).toEqual({ start: "2027-03-01", currency: "EUR", ...direct });
-    // And by hand: 1900 sent + 1500 not yet transferred + 1200 held + 500 fee; the reversed one is out.
-    expect(direct).toEqual({ earningsCents: 5100, sessions: 4, kwh: 19.75 });
+    // And by hand: 2000 + 1500 + 1200 paid, 800 refunded in full, half of 500 refunded (the
+    // failed refund does not count); card fees 55 + 48 + 43 + 16 (half of 33, rounded down),
+    // and a platform fee of 100 on the first.
+    expect(direct).toEqual({
+      grossCents: 4950,
+      cardFeeCents: 162,
+      earningsCents: 4688,
+      sessions: 4,
+      kwh: 19.75,
+    });
   });
 
   it("has 8 Monday-to-Sunday weeks, each matching its own sum", async () => {
@@ -322,8 +354,8 @@ describe("GET /hosts/dashboard", () => {
         ...(await directSums(from.toISOString(), to.toISOString())),
       });
     }
-    expect(weeks.at(-4)).toMatchObject({ earningsCents: 3000, sessions: 1, kwh: 20 });
-    expect(weeks.at(-1)).toMatchObject({ earningsCents: 1500, sessions: 1, kwh: 4.25 });
+    expect(weeks.at(-4)).toMatchObject({ grossCents: 3000, earningsCents: 2930, sessions: 1 });
+    expect(weeks.at(-1)).toMatchObject({ grossCents: 1500, cardFeeCents: 48, earningsCents: 1452 });
   });
 
   it("shows each charger's pill, listing and next booking, tonight's bookings and requests", async () => {

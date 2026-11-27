@@ -1,95 +1,102 @@
 import {
-  billingBreakdown,
-  billingStart,
+  bookingStatusSchema,
   centsPerKwh,
   currencySchema,
+  hostEarnings,
+  isOpenSession,
+  refundReasonSchema,
+  refundStatusSchema,
   sessionStatusSchema,
-  transferHoldReasonSchema,
-  transferStatusSchema,
+  slotMinutes,
+  TERMINAL_BOOKING_STATUSES,
 } from "@nd/domain";
 import { z } from "zod";
 
-import {
-  type BookingDetail,
-  findBookingDetail,
-  findTransfer,
-  type Transfer,
-} from "../data/bookings.ts";
-import { billedSessionOf, findReview, type Session } from "../data/settlement.ts";
+import { type BookingDetail, findBookingDetail } from "../data/bookings.ts";
+import { type Refund, refundsOf } from "../data/payments.ts";
+import { billedSessionOf, findReview, meterSamples, type Session } from "../data/settlement.ts";
 import { HttpProblem } from "../http/problem.ts";
 import type { Services } from "../services.ts";
 import type { SavedCard } from "../stripe/payments.ts";
-import { formatDuration, formatMoney } from "./format.ts";
 
-// The receipt for a finished booking, for its driver or its host. Billing
-// is by time: the minutes from session start to stop, rounded up to 5, at
-// the hourly price and capped at the quote. kWh are shown, not billed.
+// The receipt for a paid booking, for its driver or its host: the price paid
+// upfront for the booked hours, any refunds, and the session as evidence of
+// what the charger did (start and stop, kWh, meter readings and power
+// samples). Nothing on it depends on the energy or the minutes used. The host
+// also sees the card fee passed on to them and what they keep.
 
-const RECEIPT_STATUSES = ["pending", "awaiting_host_confirmation", "needs_review", "paid"] as const;
+/** Most meter samples a receipt lists. */
+export const RECEIPT_SAMPLE_LIMIT = 500;
 
-const receiptLine = z.object({
-  kind: z.enum(["time", "cap", "adjustment", "platform_fee"]),
-  description: z.string(),
-  amountCents: z
-    .number()
-    .int()
-    .describe(
-      "Negative for a reduction. A platform fee is taken from the host's payout, not added",
-    ),
-});
+const isoDateTime = z.iso.datetime();
 
 export const receiptSchema = z
   .object({
     bookingId: z.uuid(),
-    sessionId: z.uuid(),
     role: z.enum(["driver", "host"]),
-    status: z
-      .enum(RECEIPT_STATUSES)
-      .describe(
-        "`pending` until reconciled; `awaiting_host_confirmation` when the session was closed without a stop; `needs_review` while support checks it; `paid` once captured",
-      ),
-    sessionStatus: sessionStatusSchema,
+    bookingStatus: bookingStatusSchema,
     currency: currencySchema,
-    startedAt: z.iso.datetime(),
-    stoppedAt: z.iso.datetime(),
-    durationMinutes: z.number().int().describe("From session start to stop, rounded up"),
-    billedMinutes: z.number().int().describe("Rounded up to the next 5 minutes"),
-    kwh: z.number().nullable().describe("Energy delivered: the meter delta"),
-    meter: z.object({
-      startKwh: z.number().nullable(),
-      stopKwh: z.number().nullable(),
-    }),
+    start: isoDateTime.describe("The booked slot, which is the charging window"),
+    end: isoDateTime,
+    bookedMinutes: z.number().int(),
     pricePerHourCents: z.number().int(),
-    quotedAmountCents: z.number().int(),
-    lines: z.array(receiptLine),
-    capNote: z.string().nullable().describe("Set when the quote capped the charge"),
-    totalCents: z
-      .number()
-      .int()
-      .describe("What the driver pays: captured once paid, otherwise the amount due"),
-    platformFeeCents: z.number().int(),
+    paidCents: z.number().int().describe("The booking's price, paid upfront"),
+    refunds: z.array(
+      z.object({
+        amountCents: z.number().int(),
+        reason: refundReasonSchema,
+        status: refundStatusSchema,
+        createdAt: isoDateTime,
+      }),
+    ),
+    refundedCents: z.number().int().describe("Refunded, or being refunded"),
+    totalCents: z.number().int().describe("What the driver paid, less refunds"),
+    session: z
+      .object({
+        sessionId: z.uuid(),
+        status: sessionStatusSchema,
+        startedAt: isoDateTime.nullable(),
+        stoppedAt: isoDateTime.nullable(),
+        stopReason: z.string().nullable(),
+        kwh: z.number().nullable().describe("Energy delivered: the meter delta"),
+        meter: z.object({ startKwh: z.number().nullable(), stopKwh: z.number().nullable() }),
+        samples: z
+          .array(
+            z.object({
+              at: isoDateTime,
+              registerKwh: z.number().nullable(),
+              kw: z.number().nullable(),
+            }),
+          )
+          .describe(
+            "Meter readings and power while charging, oldest first: evidence the charger worked",
+          ),
+      })
+      .nullable()
+      .describe("The charging session; null when none started"),
     effectiveCentsPerKwh: z
       .number()
       .int()
       .nullable()
-      .describe("The total divided by the energy delivered, for comparison; billing is by time"),
+      .describe("What was paid divided by the energy delivered, for comparison only"),
     card: z
       .object({ brand: z.string(), last4: z.string() })
       .nullable()
       .describe("The driver's card; driver only"),
-    hostPayout: z
+    hostEarnings: z
       .object({
-        amountCents: z.number().int(),
-        status: transferStatusSchema,
-        holdReason: transferHoldReasonSchema.nullable(),
+        grossCents: z.number().int(),
+        cardFeeCents: z.number().int().describe("The card fee, passed on to the host"),
+        platformFeeCents: z.number().int(),
+        netCents: z.number().int().describe("What the host receives"),
       })
       .nullable()
-      .describe("The host's transfer; host only, once the payment is captured"),
+      .describe("Host only"),
     review: z
       .object({
         rating: z.number().int(),
         comment: z.string().nullable(),
-        createdAt: z.iso.datetime(),
+        createdAt: isoDateTime,
       })
       .nullable()
       .describe("The driver's review of this booking"),
@@ -99,131 +106,73 @@ export const receiptSchema = z
 
 export type Receipt = z.infer<typeof receiptSchema>;
 
-/** Session statuses a receipt can be shown for. */
-const RECEIPT_SESSION_STATUSES: readonly Session["status"][] = [
-  "stopped",
-  "needs_review",
-  "needs_host_confirmation",
-  "reconciled",
-];
-
-/** Whether a session has stopped, so its receipt can be shown. */
-export function hasReceipt(session: Session | undefined): session is Session & { stoppedAt: Date } {
-  const stoppedAt = session?.stoppedAt ?? null;
-  return (
-    stoppedAt !== null && session !== undefined && RECEIPT_SESSION_STATUSES.includes(session.status)
-  );
-}
+type Sample = Awaited<ReturnType<typeof meterSamples>>[number];
 
 export interface ReceiptInput {
-  readonly detail: BookingDetail;
-  readonly session: Session & { stoppedAt: Date };
+  readonly detail: BookingDetail & { payment: NonNullable<BookingDetail["payment"]> };
   readonly role: "driver" | "host";
+  readonly session: Session | undefined;
+  readonly samples: readonly Sample[];
+  readonly refunds: readonly Refund[];
   readonly card: SavedCard | undefined;
-  readonly transfer: Transfer | undefined;
   readonly review: { rating: number; comment: string | null; createdAt: Date } | undefined;
-}
-
-function receiptStatus(session: Session, captured: boolean): Receipt["status"] {
-  if (session.status === "needs_review") return "needs_review";
-  if (session.status === "needs_host_confirmation") return "awaiting_host_confirmation";
-  return session.status === "reconciled" || captured ? "paid" : "pending";
 }
 
 const toKwh = (wh: number | null) => (wh === null ? null : wh / 1000);
 
-/** Builds the receipt of a stopped session. */
+/** Builds a paid booking's receipt. */
 export function buildReceipt(input: ReceiptInput): Receipt {
-  const { detail, session, role } = input;
+  const { detail, role, session, review } = input;
   const { booking, payment } = detail;
-  const currency = booking.currency;
-  const pricePerHourCents = booking.pricePerHourCents ?? 0;
-  const startedAt =
-    billingStart({ pluggedInAt: booking.pluggedInAt, startedAt: session.startedAt }) ??
-    session.createdAt;
-  const stoppedAt = session.stoppedAt < startedAt ? startedAt : session.stoppedAt;
-  const breakdown = billingBreakdown(
-    startedAt,
-    stoppedAt,
-    pricePerHourCents,
-    booking.quotedAmountCents,
-  );
-  const captured = payment?.status === "captured";
-  const settled = session.status === "reconciled";
-  const totalCents = captured || settled ? (payment?.capturedCents ?? 0) : breakdown.amountCents;
-
-  const lines: Receipt["lines"] = [
-    {
-      kind: "time",
-      description: `${formatDuration(breakdown.billedMinutes)} at ${formatMoney(pricePerHourCents, currency)} an hour`,
-      amountCents: breakdown.timeCostCents,
-    },
-  ];
-  if (breakdown.capped) {
-    lines.push({
-      kind: "cap",
-      description: `Capped at the quoted ${formatMoney(booking.quotedAmountCents, currency)}`,
-      amountCents: breakdown.amountCents - breakdown.timeCostCents,
-    });
-  }
-  if (totalCents !== breakdown.amountCents) {
-    lines.push({
-      kind: "adjustment",
-      description: "Adjusted after review",
-      amountCents: totalCents - breakdown.amountCents,
-    });
-  }
-  const platformFeeCents = payment?.platformFeeCents ?? 0;
-  if (platformFeeCents > 0) {
-    lines.push({
-      kind: "platform_fee",
-      description: "Platform fee, taken from the host's payout",
-      amountCents: platformFeeCents,
-    });
-  }
-
-  const deliveredWh =
-    session.meterStartWh !== null &&
-    session.meterStopWh !== null &&
-    session.meterStopWh >= session.meterStartWh
-      ? session.meterStopWh - session.meterStartWh
-      : null;
-  const review = input.review;
+  const refundedCents = input.refunds
+    .filter((refund) => refund.status !== "failed")
+    .reduce((total, refund) => total + refund.amountCents, 0);
+  const totalCents = payment.amountCents - refundedCents;
+  const start = session?.meterStartWh ?? null;
+  const stop = session?.meterStopWh ?? null;
+  const deliveredWh = start !== null && stop !== null && stop >= start ? stop - start : null;
   return {
     bookingId: booking.id,
-    sessionId: session.id,
     role,
-    status: receiptStatus(session, captured),
-    sessionStatus: session.status,
-    currency,
-    startedAt: startedAt.toISOString(),
-    stoppedAt: stoppedAt.toISOString(),
-    durationMinutes: breakdown.actualMinutes,
-    billedMinutes: breakdown.billedMinutes,
-    kwh: deliveredWh === null ? session.kwh : deliveredWh / 1000,
-    meter: { startKwh: toKwh(session.meterStartWh), stopKwh: toKwh(session.meterStopWh) },
-    pricePerHourCents,
-    quotedAmountCents: booking.quotedAmountCents,
-    lines,
-    capNote: breakdown.capped
-      ? `${formatDuration(breakdown.billedMinutes)} would cost ${formatMoney(breakdown.timeCostCents, currency)}; the charge never goes above the quote of ${formatMoney(booking.quotedAmountCents, currency)}.`
-      : null,
+    bookingStatus: booking.status,
+    currency: booking.currency,
+    start: booking.slot.start.toISOString(),
+    end: booking.slot.end.toISOString(),
+    bookedMinutes: slotMinutes(booking.slot),
+    pricePerHourCents: booking.pricePerHourCents ?? 0,
+    paidCents: payment.amountCents,
+    refunds: input.refunds.map((refund) => ({
+      amountCents: refund.amountCents,
+      reason: refund.reason,
+      status: refund.status,
+      createdAt: refund.createdAt.toISOString(),
+    })),
+    refundedCents,
     totalCents,
-    platformFeeCents,
+    session:
+      session === undefined
+        ? null
+        : {
+            sessionId: session.id,
+            status: session.status,
+            startedAt: session.startedAt?.toISOString() ?? null,
+            stoppedAt: session.stoppedAt?.toISOString() ?? null,
+            stopReason: session.stopReason,
+            kwh: deliveredWh === null ? session.kwh : deliveredWh / 1000,
+            meter: { startKwh: toKwh(session.meterStartWh), stopKwh: toKwh(session.meterStopWh) },
+            samples: input.samples.map((sample) => ({
+              at: sample.ts.toISOString(),
+              registerKwh: toKwh(sample.energyWh),
+              kw: sample.powerW === null ? null : sample.powerW / 1000,
+            })),
+          },
     effectiveCentsPerKwh:
       deliveredWh === null ? null : (centsPerKwh(totalCents, deliveredWh) ?? null),
     card:
       role === "driver" && input.card !== undefined
         ? { brand: input.card.brand, last4: input.card.last4 }
         : null,
-    hostPayout:
-      role === "host" && input.transfer !== undefined
-        ? {
-            amountCents: input.transfer.amountCents,
-            status: input.transfer.status,
-            holdReason: input.transfer.holdReason,
-          }
-        : null,
+    hostEarnings: role === "host" ? hostEarnings(payment, refundedCents) : null,
     review:
       review === undefined
         ? null
@@ -236,7 +185,10 @@ export function buildReceipt(input: ReceiptInput): Receipt {
   };
 }
 
-/** A booking's receipt for its driver or host; 404 for anyone else, 409 before the session stops. */
+/**
+ * A booking's receipt for its driver or host; 404 for anyone else, 409 until
+ * it was paid and has finished (or its session has stopped).
+ */
 export async function loadReceipt(
   services: Services,
   bookingId: string,
@@ -250,18 +202,21 @@ export async function loadReceipt(
     throw new HttpProblem(404, "booking-not-found", "No such booking");
   }
   const role = detail.host.userId === viewerId ? "host" : "driver";
+  const { payment, driver, booking } = detail;
   const session = await billedSessionOf(services.db, bookingId);
-  if (!hasReceipt(session)) {
+  const finished =
+    (TERMINAL_BOOKING_STATUSES as readonly string[]).includes(booking.status) ||
+    (session !== undefined && !isOpenSession(session.status));
+  if (payment?.status !== "paid" || !finished) {
     throw new HttpProblem(
       409,
       "receipt-not-ready",
       "There is no receipt yet",
-      "A receipt is ready once the charging session has stopped.",
+      "A receipt is ready once a paid booking has finished or its session has stopped.",
     );
   }
-  const { payment, driver } = detail;
-  const [card, transfer, review] = await Promise.all([
-    role === "driver" && payment?.stripePaymentMethodId && driver.stripeCustomerId
+  const [card, refunds, samples, review] = await Promise.all([
+    role === "driver" && payment.stripePaymentMethodId && driver.stripeCustomerId
       ? services.payments
           .findCard(driver.stripeCustomerId, payment.stripePaymentMethodId)
           .catch((error: unknown) => {
@@ -269,8 +224,17 @@ export async function loadReceipt(
             return undefined;
           })
       : undefined,
-    payment === null ? undefined : findTransfer(services.db, payment.id),
-    findReview(services.db, bookingId, detail.booking.driverId),
+    refundsOf(services.db, payment.id),
+    session === undefined ? [] : meterSamples(services.db, session.id, RECEIPT_SAMPLE_LIMIT),
+    findReview(services.db, bookingId, booking.driverId),
   ]);
-  return buildReceipt({ detail, session, role, card, transfer, review });
+  return buildReceipt({
+    detail: { ...detail, payment },
+    role,
+    session,
+    samples,
+    refunds,
+    card,
+    review,
+  });
 }

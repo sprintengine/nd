@@ -7,11 +7,13 @@ import {
   notificationPreferences,
   notifications,
   payments,
+  refunds,
   sessions,
 } from "@nd/db";
 import {
   DEFAULT_NOTIFICATION_PREFERENCES,
   type DevicePlatform,
+  hostEarnings,
   type NotificationPreferences,
 } from "@nd/domain";
 import { and, asc, eq, gt, inArray, isNull, like, lt, ne, notInArray, sql } from "drizzle-orm";
@@ -255,8 +257,8 @@ export async function notificationSession(db: Executor, sessionId: string) {
 }
 
 /**
- * What settlement captured for a booking (the amount billed to the driver)
- * and the host's share of it; undefined until the payment is captured.
+ * What the driver paid for a booking (less refunds) and what the host keeps
+ * of it; undefined until it is paid.
  */
 export async function settledAmounts(
   db: Executor,
@@ -264,17 +266,20 @@ export async function settledAmounts(
 ): Promise<{ billedCents: number; earningsCents: number; currency: string } | undefined> {
   const [row] = await db
     .select({
-      capturedCents: payments.capturedCents,
+      amountCents: payments.amountCents,
       platformFeeCents: payments.platformFeeCents,
+      cardFeeCents: payments.cardFeeCents,
       currency: payments.currency,
+      refundedCents: sql<number>`(select coalesce(sum(${refunds.amountCents}), 0)::int from ${refunds} where ${refunds.paymentId} = ${payments.id} and ${refunds.status} <> 'failed')`,
     })
     .from(payments)
-    .where(and(eq(payments.bookingId, bookingId), eq(payments.status, "captured")))
+    .where(and(eq(payments.bookingId, bookingId), eq(payments.status, "paid")))
     .limit(1);
   if (row === undefined) return undefined;
+  const earnings = hostEarnings(row, row.refundedCents);
   return {
-    billedCents: row.capturedCents,
-    earningsCents: row.capturedCents - row.platformFeeCents,
+    billedCents: earnings.grossCents,
+    earningsCents: earnings.netCents,
     currency: row.currency,
   };
 }

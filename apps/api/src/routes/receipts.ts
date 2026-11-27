@@ -33,7 +33,7 @@ export function registerReceiptRoutes(app: FastifyInstance, services: Services):
       schema: {
         summary: "A booking's receipt",
         description:
-          "For the driver or the host, once the session has stopped (409 before). Billing is by time: the minutes from session start to stop, rounded up to 5, at the hourly price and capped at the quote. Shows the energy delivered (meter start to stop), the effective price per kWh for comparison, the driver's card (driver only) and the host's payout (host only).",
+          "For the driver or the host, once a paid booking has finished or its session has stopped (409 before). The driver paid the booked hours upfront; the receipt shows that price, any refunds, and the session as evidence of what the charger did: start and stop, kWh delivered (meter start to stop), meter readings and power samples. Nothing is billed by energy or by minutes used. The driver sees their card; the host sees the card fee passed on to them and what they keep.",
         tags: ["bookings"],
         params: bookingParams,
         response: { 200: receiptSchema, ...problemResponses(400, 401, 404, 409) },

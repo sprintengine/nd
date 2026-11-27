@@ -30,7 +30,12 @@ const isoDay = z.iso.date().describe("A day in the host's time zone, YYYY-MM-DD"
 
 const periodSchema = z.object({
   start: isoDay.describe("First day of the period in the host's time zone"),
-  earningsCents: z.number().int(),
+  grossCents: z
+    .number()
+    .int()
+    .describe("What drivers paid for the period's bookings, less refunds"),
+  cardFeeCents: z.number().int().describe("The card fees passed on to the host"),
+  earningsCents: z.number().int().describe("What the host receives: gross less fees"),
   sessions: z.number().int(),
   kwh: z.number(),
 });
@@ -164,7 +169,7 @@ export function registerHostDashboardRoutes(app: FastifyInstance, services: Serv
       schema: {
         summary: "The host's home screen",
         description:
-          "This month's earnings, sessions and kWh, an 8-week weekly series, a card per charger (status pill, listing switch, next booking), tonight's bookings and requests waiting for an answer. Periods are in the host's time zone and a booking counts in the period its slot starts in. Earnings are the host's share of captured payments, paid out or pending, in the currency the host is paid in.",
+          "This month's earnings, sessions and kWh, an 8-week weekly series, a card per charger (status pill, listing switch, next booking), tonight's bookings and requests waiting for an answer. Periods are in the host's time zone and a booking counts in the period its slot starts in. Each booking is paid upfront as a destination charge to the host's account: a period shows what drivers paid (less refunds), the card fees passed on to the host, and what the host keeps, in the currency the host is paid in.",
         tags: ["hosts"],
         response: { 200: dashboardSchema, ...problemResponses(401, 403) },
       },
