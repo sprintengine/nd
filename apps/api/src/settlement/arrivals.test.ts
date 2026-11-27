@@ -43,7 +43,7 @@ beforeEach(() => {
   env = settlementServices(AFTER);
   vi.mocked(bookingData.updateBookingFrom).mockResolvedValue(true);
   vi.mocked(data.billedSessionOf).mockResolvedValue(undefined);
-  vi.mocked(data.hasAnySession).mockResolvedValue(false);
+  vi.mocked(data.startFailedAtCharger).mockResolvedValue(false);
   vi.mocked(paymentData.updateBookingWithRefund).mockResolvedValue({ changed: true, refund });
 });
 
@@ -62,12 +62,9 @@ describe("closeArrivedBooking", () => {
   });
 
   it.each([
-    ["a start was tried and failed", () => vi.mocked(data.hasAnySession).mockResolvedValue(true)],
     [
-      "the car was plugged in",
-      () => {
-        arrived({ booking: { pluggedInAt: SLOT.start } });
-      },
+      "a start failed at the charger",
+      () => vi.mocked(data.startFailedAtCharger).mockResolvedValue(true),
     ],
     [
       "the charger is offline",
@@ -90,6 +87,17 @@ describe("closeArrivedBooking", () => {
       amountCents: 1000,
       idempotencyKey: "refund-refund-1",
     });
+  });
+
+  it("does not refund a driver who plugged in and stopped before charging began", async () => {
+    arrived({ booking: { pluggedInAt: SLOT.start } });
+    await expect(closeArrivedBooking(env.services, BOOKING_ID)).resolves.toBe("no_show");
+    expect(data.startFailedAtCharger).toHaveBeenCalledWith(
+      expect.anything(),
+      BOOKING_ID,
+      expect.any(String),
+    );
+    expect(paymentData.updateBookingWithRefund).not.toHaveBeenCalled();
   });
 
   it("resumes a refund Stripe did not answer", async () => {

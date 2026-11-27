@@ -87,7 +87,8 @@ export async function recordArrival(
 
 /**
  * Records a scheduled start on an arrived booking: when the remote start will
- * be sent and when the driver plugged in. `null` clears a scheduled start.
+ * be sent and when the driver plugged in. `null` clears a scheduled start,
+ * and the plug-in with it: a driver who cancels a start is no longer waiting.
  */
 export async function setScheduledStart(
   db: Executor,
@@ -96,7 +97,7 @@ export async function setScheduledStart(
 ): Promise<boolean> {
   const rows = await db
     .update(bookings)
-    .set(schedule ?? { scheduledStartAt: null })
+    .set(schedule ?? { scheduledStartAt: null, pluggedInAt: null })
     .where(and(eq(bookings.id, bookingId), eq(bookings.status, "arrived")))
     .returning({ id: bookings.id });
   return rows.length > 0;

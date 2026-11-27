@@ -547,6 +547,9 @@ describe("scheduled start", () => {
     await start(booking, { startAt: startAt.toISOString() });
     const stopped = await call("POST", `/bookings/${booking.id}/stop`, driver);
     expect(stopped.json<SessionState>().status).toBe("not_started");
+    // Cancelling the start clears the plug-in too: the driver is no longer waiting.
+    const [row] = await h.database.db.select().from(bookings).where(eq(bookings.id, booking.id));
+    expect(row).toMatchObject({ scheduledStartAt: null, pluggedInAt: null });
     clock.current = startAt;
     await h.jobs.runNow(remoteStartJob, { bookingId: booking.id });
     expect(control.callsTo("remoteStart")).toEqual([]);

@@ -4,6 +4,7 @@ import {
   type Executor,
   hosts,
   meterValues,
+  ocppMessages,
   payments,
   reviews,
   sessions,
@@ -145,14 +146,50 @@ export async function arrivedWithoutSession(
   return rows.map((row) => row.id);
 }
 
-/** Whether a start was ever attempted for the booking (any session, failed ones included). */
-export async function hasAnySession(db: Executor, bookingId: string): Promise<boolean> {
-  const rows = await db
-    .select({ id: sessions.id })
-    .from(sessions)
-    .where(eq(sessions.bookingId, bookingId))
-    .limit(1);
-  return rows.length > 0;
+/** Why a start failed, when the reason points at the charger rather than the driver. */
+const CHARGER_SIDE_START_FAILURES = [
+  "charger_offline",
+  "no_response",
+  "gateway_unreachable",
+  "rejected",
+];
+
+/** Connector states that mean a cable was plugged in. */
+const CABLE_CONNECTED = ["Preparing", "SuspendedEV"];
+
+/**
+ * Whether a failed start of the booking was the charger's doing: it was
+ * offline, did not answer or refused, or it timed out while the charger's
+ * connector showed a cable plugged in (its StatusNotification after the
+ * failure). A driver stopping before the start, or a timeout with nothing
+ * plugged in, does not count.
+ */
+export async function startFailedAtCharger(
+  db: Executor,
+  bookingId: string,
+  chargerId: string,
+): Promise<boolean> {
+  const list = (values: readonly string[]) =>
+    sql.join(
+      values.map((value) => sql`${value}`),
+      sql`, `,
+    );
+  const result = await db.execute<{ found: boolean }>(sql`
+    select exists (
+      select 1 from ${sessions} s
+      where s.booking_id = ${bookingId} and s.status = 'failed'
+        and (
+          s.stop_reason in (${list(CHARGER_SIDE_START_FAILURES)})
+          or (s.stop_reason = 'start_timeout' and (
+            select m.payload ->> 'status' from ${ocppMessages} m
+            where m.charger_id = ${chargerId} and m.direction = 'in'
+              and m.action = 'StatusNotification' and m.payload ->> 'connectorId' <> '0'
+              and m.ts >= s.created_at and m.ts <= s.updated_at + interval '2 minutes'
+            order by m.ts desc limit 1
+          ) in (${list(CABLE_CONNECTED)}))
+        )
+    ) as found`);
+  return result.rows[0]?.found === true;
 }
 
 /** The session a booking charged in: its latest one that did not fail to start. */

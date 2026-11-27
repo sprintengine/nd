@@ -6,6 +6,7 @@ import {
   chargers,
   hosts,
   meterValues,
+  ocppMessages,
   payments,
   refunds,
   sessions,
@@ -518,13 +519,52 @@ describe("an arrival that never got a session", () => {
     expect(await refundsOf(booked.bookingId)).toEqual([]);
   });
 
-  it("is refunded in full, automatically, when the charger never started", async () => {
-    const booked = await arrivedBooking();
+  /** A start that timed out, and the connector state the charger reported just after. */
+  async function timedOut(booked: Booked, connector: "Preparing" | "Available") {
+    const failedAt = new Date(booked.slot.start.getTime() + 2 * MINUTE);
     await h.database.db.insert(sessions).values({
       bookingId: booked.bookingId,
       status: "failed",
       stopReason: "start_timeout",
+      createdAt: booked.slot.start,
+      updatedAt: failedAt,
     });
+    await h.database.db.insert(ocppMessages).values({
+      chargerId: booked.chargerId,
+      direction: "in",
+      messageType: "call",
+      messageId: randomBytes(8).toString("hex"),
+      action: "StatusNotification",
+      payload: { connectorId: 1, errorCode: "NoError", status: connector },
+      ts: new Date(failedAt.getTime() + 5_000),
+    });
+  }
+
+  it("is not refunded when the driver alone stopped the start, or nothing was plugged in", async () => {
+    const stoppedByDriver = await arrivedBooking();
+    await h.database.db
+      .update(bookings)
+      .set({ pluggedInAt: stoppedByDriver.slot.start })
+      .where(eq(bookings.id, stoppedByDriver.bookingId));
+    await h.database.db.insert(sessions).values({
+      bookingId: stoppedByDriver.bookingId,
+      status: "failed",
+      stopReason: "stopped_before_start",
+    });
+    const unplugged = await arrivedBooking();
+    await timedOut(unplugged, "Available");
+    clock.current = new Date(unplugged.slot.end.getTime() + 11 * MINUTE);
+    await h.jobs.runNow(settlementSweepJob, {});
+    await h.jobs.drain();
+    for (const booked of [stoppedByDriver, unplugged]) {
+      expect(await statusOf(booked.bookingId)).toBe("no_show");
+      expect(await refundsOf(booked.bookingId)).toEqual([]);
+    }
+  });
+
+  it("is refunded in full, automatically, when the charger never started", async () => {
+    const booked = await arrivedBooking();
+    await timedOut(booked, "Preparing");
     clock.current = new Date(booked.slot.end.getTime() + 11 * MINUTE);
     await h.jobs.runNow(settlementSweepJob, {});
     await h.jobs.drain();
