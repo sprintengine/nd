@@ -354,26 +354,26 @@ The transfer amount is the captured amount minus the platform fee (`PLATFORM_FEE
 
 ### 8.2 Messages
 
-| From the charger     | Gateway response and action                                                                                                                                      |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BootNotification`   | Accepted, interval 300. Charger `online`. Push the configuration set (8.3).                                                                                      |
-| `Heartbeat`          | Current time. Update `last_heartbeat_at`.                                                                                                                        |
-| `StatusNotification` | Update connector status; an error code other than `NoError` makes the charger `faulted`; `SuspendedEV` and `SuspendedEVSE` map to session states.                |
-| `Authorize`          | `Accepted` only for the idTag of a booking that is `arrived` or `active` inside its window, or for the host's own tag outside paid windows. Otherwise `Invalid`. |
-| `StartTransaction`   | Create the session and return a `transactionId`. The host's own tag during a paid window gets `Blocked` and a remote stop.                                       |
-| `MeterValues`        | Append to `meter_values`; publish to the API.                                                                                                                    |
-| `StopTransaction`    | Close the session, publish, enqueue reconciliation.                                                                                                              |
-| `DataTransfer`       | `UnknownVendorId`; logged.                                                                                                                                       |
+| From the charger     | Gateway response and action                                                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BootNotification`   | Accepted, interval 300. Charger `online`. Push the configuration set (8.3).                                                                                         |
+| `Heartbeat`          | Current time. Update `last_heartbeat_at`.                                                                                                                           |
+| `StatusNotification` | Update connector status; an error code other than `NoError` makes the charger `faulted`; `SuspendedEV` and `SuspendedEVSE` map to session states.                   |
+| `Authorize`          | `Accepted` only for the idTag of a booking that is `arrived` or `active` inside its window, or for the host's own tag outside paid windows. Otherwise `Invalid`.    |
+| `StartTransaction`   | Create the session and return a `transactionId`. The host's own tag during a paid window gets `Blocked` and a remote stop.                                          |
+| `MeterValues`        | Append to `meter_values`; publish to the API. When the booking's kWh cap has been delivered, a remote stop (re-checked on later MeterValues and after a reconnect). |
+| `StopTransaction`    | Close the session, publish, enqueue reconciliation.                                                                                                                 |
+| `DataTransfer`       | `UnknownVendorId`; logged.                                                                                                                                          |
 
-| To the charger           | When                                                                                    |
-| ------------------------ | --------------------------------------------------------------------------------------- |
-| `RemoteStartTransaction` | Driver taps Start in the window, or the scheduled-start job fires.                      |
-| `RemoteStopTransaction`  | Driver taps Stop, the window ends, or the host makes an emergency stop.                 |
-| `ChangeConfiguration`    | After boot (8.3). At most 24 writes per charger per rolling hour, to protect its flash. |
-| `GetConfiguration`       | Verify the pushed set; store it in `chargers.ocpp_config`.                              |
-| `TriggerMessage`         | Recover state after a reconnect or a missing `StartTransaction`.                        |
-| `Reset` (soft)           | A remote start was rejected because a stale transaction is still open; retried once.    |
-| `UnlockConnector`        | Host support action.                                                                    |
+| To the charger           | When                                                                                            |
+| ------------------------ | ----------------------------------------------------------------------------------------------- |
+| `RemoteStartTransaction` | Driver taps Start in the window, or the scheduled-start job fires.                              |
+| `RemoteStopTransaction`  | Driver taps Stop, the window ends, the kWh cap is reached, or the host makes an emergency stop. |
+| `ChangeConfiguration`    | After boot (8.3). At most 24 writes per charger per rolling hour, to protect its flash.         |
+| `GetConfiguration`       | Verify the pushed set; store it in `chargers.ocpp_config`.                                      |
+| `TriggerMessage`         | Recover state after a reconnect or a missing `StartTransaction`.                                |
+| `Reset` (soft)           | A remote start was rejected because a stale transaction is still open; retried once.            |
+| `UnlockConnector`        | Host support action.                                                                            |
 
 Not used: `ReserveNow` (unsupported on Zappi), `SetChargingProfile` (not available in this mode), `SendLocalList` (the local list stays disabled so every tag is checked with us).
 

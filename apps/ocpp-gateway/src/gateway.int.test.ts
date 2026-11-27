@@ -407,6 +407,52 @@ describe("sessions", () => {
     expect(types.lastIndexOf("meter")).toBeLessThan(types.indexOf("session_stopped"));
   });
 
+  it("stops a session at its kWh cap once per socket, and again after a reconnect", async () => {
+    const charger = await seedCharger(database.db);
+    const booking = await seedOpenBooking(database.db, charger.id, "arrived");
+    await database.db.update(bookings).set({ kwhCap: 2 }).where(eq(bookings.id, booking.id));
+    // 3,600 kW: one kWh a second, so the 2 kWh cap is reached after two seconds. The first stop is never answered.
+    const zappi = await sim(charger, {
+      meterWh: 10_000,
+      chargeRateKw: 3_600,
+      faults: { ignoreCalls: ["RemoteStopTransaction"] },
+    });
+    await configured(charger.id);
+    zappi.plugIn();
+    await zappi.waitForStatus("Preparing");
+    await control().remoteStart({ chargeboxId: charger.chargeboxId, idTag: booking.idTag });
+    await zappi.waitForStatus("Charging");
+
+    // Below the cap: nothing is stopped.
+    await zappi.sendMeterValues("Sample.Periodic");
+    await new Promise((resolve) => setTimeout(resolve, 2_200));
+    expect(zappi.received("RemoteStopTransaction")).toHaveLength(0);
+
+    // Over the cap: one stop, not repeated while it is outstanding.
+    await zappi.sendMeterValues("Sample.Periodic");
+    await eventually(() => {
+      expect(zappi.received("RemoteStopTransaction")).toHaveLength(1);
+    });
+    await zappi.sendMeterValues("Sample.Periodic");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(zappi.received("RemoteStopTransaction")).toHaveLength(1);
+
+    // After a reconnect the next MeterValues checks again, and this stop is obeyed.
+    zappi.setFaults({ ignoreCalls: [] });
+    await zappi.reconnect({ boot: false });
+    await zappi.sendMeterValues("Sample.Periodic");
+    await zappi.waitForSent("StopTransaction");
+    expect(zappi.received("RemoteStopTransaction")).toHaveLength(2);
+    await eventually(async () => {
+      const [session] = await database.db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.bookingId, booking.id));
+      expect(session).toMatchObject({ status: "stopped", stopReason: "Remote" });
+      expect(session?.kwh).toBeGreaterThanOrEqual(2);
+    });
+  });
+
   it("answers Invalid to a random idTag, and the charger stops its transaction", async () => {
     const charger = await seedCharger(database.db);
     const booking = await seedOpenBooking(database.db, charger.id, "arrived");

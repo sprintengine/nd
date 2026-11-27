@@ -97,6 +97,13 @@ export interface StoppedSession {
   readonly changed: boolean;
 }
 
+/** An open booking session whose delivered energy has reached the booking's kWh cap. */
+export interface KwhCapReached {
+  readonly transactionId: number;
+  readonly deliveredKwh: number;
+  readonly kwhCap: number;
+}
+
 /**
  * Everything the gateway reads and writes. Each write that other services
  * care about publishes its charger event in the same transaction.
@@ -122,6 +129,8 @@ export interface GatewayStore {
   stopSession(charger: ChargerRef, input: StopSessionInput): Promise<StoppedSession | undefined>;
   /** Marks chargers whose last heartbeat is before `cutoff` offline; returns how many. */
   markStaleChargersOffline(cutoff: Date, at: Date): Promise<number>;
+  /** Set when the open session has delivered its booking's kWh cap or more. */
+  kwhCapReached(sessionId: string): Promise<KwhCapReached | undefined>;
 }
 
 type EventFields = ChargerEvent extends infer E
@@ -185,6 +194,43 @@ async function sessionForTransaction(executor: Executor, chargerId: string, tran
     .limit(1)
     .for("update", { of: sessions });
   return row;
+}
+
+/**
+ * The session's transaction and energy delivered so far (the highest meter
+ * reading less the start), when it is still open and its booking's kWh cap
+ * is reached. Undefined without a cap, a transaction or a reading.
+ */
+async function kwhCapReached(db: Executor, sessionId: string): Promise<KwhCapReached | undefined> {
+  const result = await db.execute<{
+    transaction_id: number;
+    delivered_wh: number | string;
+    kwh_cap: number | string;
+  }>(sql`
+    select s.ocpp_transaction_id as transaction_id,
+      max(mv.energy_wh) - s.meter_start_wh as delivered_wh,
+      b.kwh_cap
+    from ${sessions} s
+    join ${bookings} b on b.id = s.booking_id
+    join ${meterValues} mv on mv.session_id = s.id and mv.energy_wh is not null
+    where s.id = ${sessionId}
+      and s.status in (${sql.join(
+        OPEN_SESSION_STATUSES.map((status) => sql`${status}::session_status`),
+        sql`, `,
+      )})
+      and s.ocpp_transaction_id is not null
+      and s.meter_start_wh is not null
+      and b.kwh_cap is not null
+    group by s.id, b.id
+    having max(mv.energy_wh) - s.meter_start_wh >= b.kwh_cap * 1000
+  `);
+  const [row] = result.rows;
+  if (row === undefined) return undefined;
+  return {
+    transactionId: row.transaction_id,
+    deliveredKwh: Number(row.delivered_wh) / 1000,
+    kwhCap: Number(row.kwh_cap),
+  };
 }
 
 /** The gateway's store on Postgres. */
@@ -521,5 +567,7 @@ export function createPgStore(db: Db): GatewayStore {
         }
         return stale.length;
       }),
+
+    kwhCapReached: (sessionId) => kwhCapReached(db, sessionId),
   };
 }

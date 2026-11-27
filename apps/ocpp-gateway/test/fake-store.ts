@@ -1,7 +1,7 @@
 import { type Mock, vi } from "vitest";
 
 import type { TagFacts } from "../src/rules.ts";
-import type { GatewayStore, OcppMessageRecord } from "../src/store.ts";
+import type { GatewayStore, KwhCapReached, OcppMessageRecord } from "../src/store.ts";
 
 /** GatewayStore with every method a spy (declared as properties, so they can be passed around). */
 type SpyStore = { -readonly [K in keyof GatewayStore]: Mock<GatewayStore[K]> };
@@ -58,6 +58,7 @@ export function fakeStore(): FakeStore {
       }),
     ),
     markStaleChargersOffline: vi.fn(() => Promise.resolve(0)),
+    kwhCapReached: vi.fn(() => Promise.resolve<KwhCapReached | undefined>(undefined)),
   };
   return store;
 }

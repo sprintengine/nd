@@ -7,6 +7,7 @@ import {
   HEARTBEAT_INTERVAL_SECONDS,
 } from "./boot-config.ts";
 import type { ChargerConnection } from "./connection.ts";
+import { kwhCapGuard } from "./kwh-cap.ts";
 import type { Logger } from "./logger.ts";
 import { extractMeterSamples } from "./meter.ts";
 import { authorizationStatus, decideIdTag, randomTransactionId } from "./rules.ts";
@@ -35,6 +36,7 @@ export function chargePointHandlers(context: HandlerContext): InboundHandlers<Ch
   const interval = context.heartbeatIntervalSeconds ?? HEARTBEAT_INTERVAL_SECONDS;
   const now = context.now ?? (() => new Date());
   let configuring = false;
+  const kwhCap = kwhCapGuard({ connection, store, logger });
 
   const pushConfig = () => {
     if (configuring) {
@@ -146,7 +148,7 @@ export function chargePointHandlers(context: HandlerContext): InboundHandlers<Ch
       return { idTagInfo: { status }, transactionId };
     },
 
-    async MeterValues(request) {
+    async MeterValues(request, { messageId }) {
       const samples = extractMeterSamples(request.meterValue);
       const sessionId = await store.recordMeterValues(charger, request.transactionId, samples);
       if (sessionId === undefined) {
@@ -154,6 +156,8 @@ export function chargePointHandlers(context: HandlerContext): InboundHandlers<Ch
           { transactionId: request.transactionId },
           "meter values without a booking session",
         );
+      } else {
+        await kwhCap.check(sessionId, messageId);
       }
       return {};
     },

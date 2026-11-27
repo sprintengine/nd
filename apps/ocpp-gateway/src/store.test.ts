@@ -439,3 +439,24 @@ describe("stopping sessions", () => {
     await expect(unknown.store.stopSession(CHARGER, input)).resolves.toBeUndefined();
   });
 });
+
+describe("kWh cap", () => {
+  it("reports a session that has delivered its cap, from the highest reading", async () => {
+    const fake = fakeDb((query) =>
+      query.text.includes("having max(mv.energy_wh)")
+        ? [{ transaction_id: 42, delivered_wh: "10250", kwh_cap: "10.00" }]
+        : [],
+    );
+    await expect(createPgStore(fake.db).kwhCapReached(SESSION)).resolves.toEqual({
+      transactionId: 42,
+      deliveredKwh: 10.25,
+      kwhCap: 10,
+    });
+    expect(fake.queries[0]?.params).toContain(SESSION);
+  });
+
+  it("reports nothing below the cap or without one", async () => {
+    const { store } = setup();
+    await expect(store.kwhCapReached(SESSION)).resolves.toBeUndefined();
+  });
+});
