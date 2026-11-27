@@ -177,23 +177,57 @@ describe("POST /webhooks/stripe", () => {
     expect(payments.calls).toEqual([]);
   });
 
-  it("confirms the pending refunds of a refunded charge", async () => {
-    vi.mocked(paymentData.confirmPendingRefunds).mockResolvedValue(1);
-    const response = await post(event("charge.refunded", { id: "ch_1", payment_intent: "pi_1" }));
+  it("records each refund's own status, by its Stripe id or our refund id", async () => {
+    const row = (id: string) =>
+      ({ id, paymentId: PAYMENT_ID }) as Awaited<ReturnType<typeof paymentData.recordStripeRefund>>;
+    vi.mocked(paymentData.recordStripeRefund)
+      .mockResolvedValueOnce(row("r1"))
+      .mockResolvedValueOnce(row("r2"));
+    const response = await post(
+      event("charge.refunded", {
+        id: "ch_1",
+        payment_intent: "pi_1",
+        refunds: {
+          data: [
+            { id: "re_1", status: "succeeded", metadata: { refundId: "r1" } },
+            {
+              id: "re_2",
+              status: "failed",
+              metadata: {},
+              failure_reason: "expired_or_canceled_card",
+            },
+          ],
+        },
+      }),
+    );
     expect(response.json()).toMatchObject({ outcome: "processed" });
-    expect(paymentData.confirmPendingRefunds).toHaveBeenCalledWith(expect.anything(), PAYMENT_ID);
-    vi.mocked(paymentData.confirmPendingRefunds).mockResolvedValue(0);
-    const nothing = await post({
-      ...event("charge.refunded", { id: "ch_1", payment_intent: { id: "pi_1" } }),
-      id: "evt_again",
-    });
-    expect(nothing.json()).toMatchObject({ outcome: "ignored" });
-    vi.mocked(data.findPaymentByIntent).mockResolvedValue(undefined);
-    const unknown = await post({
-      ...event("charge.refunded", { id: "ch_2", payment_intent: null }),
-      id: "evt_unknown",
-    });
-    expect(unknown.json()).toMatchObject({ outcome: "ignored" });
+    expect(vi.mocked(paymentData.recordStripeRefund).mock.calls.map((call) => call[1])).toEqual([
+      { stripeRefundId: "re_1", refundId: "r1", status: "succeeded", failureReason: null },
+      {
+        stripeRefundId: "re_2",
+        refundId: undefined,
+        status: "failed",
+        failureReason: "expired_or_canceled_card",
+      },
+    ]);
+  });
+
+  it.each(["refund.updated", "refund.failed", "charge.refund.updated"])(
+    "applies %s to the refund it names, and ignores one it cannot match",
+    async (type) => {
+      vi.mocked(paymentData.recordStripeRefund).mockResolvedValueOnce(undefined);
+      const unmatched = await post(event(type, { id: "re_9", status: "canceled", metadata: {} }));
+      expect(unmatched.json()).toMatchObject({ outcome: "ignored" });
+      expect(vi.mocked(paymentData.recordStripeRefund).mock.calls[0]?.[1]).toMatchObject({
+        stripeRefundId: "re_9",
+        status: "failed",
+      });
+    },
+  );
+
+  it("ignores a refunded charge without refunds listed", async () => {
+    const response = await post(event("charge.refunded", { id: "ch_1", payment_intent: "pi_1" }));
+    expect(response.json()).toMatchObject({ outcome: "ignored" });
   });
 
   it("records a card dispute for support, and its outcome", async () => {

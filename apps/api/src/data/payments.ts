@@ -136,20 +136,54 @@ export async function updatePendingRefund(
   return rows.length > 0;
 }
 
-/** Marks a payment's pending refunds that Stripe has accepted as succeeded. Resolves to how many. */
-export async function confirmPendingRefunds(db: Executor, paymentId: string): Promise<number> {
-  const rows = await db
+/**
+ * Records Stripe's status of a refund, found by its Stripe id or, before that
+ * id is saved, by our refund id (its metadata). Only a pending refund
+ * changes; staying pending still touches it, so the sweep looks again later.
+ * Resolves to the refund it matched, if any.
+ */
+export async function recordStripeRefund(
+  db: Executor,
+  refund: {
+    readonly stripeRefundId: string;
+    readonly refundId: string | undefined;
+    readonly status: RefundStatus;
+    readonly failureReason?: string | null;
+  },
+): Promise<Refund | undefined> {
+  const [row] = await db
     .update(refunds)
-    .set({ status: "succeeded" })
+    .set({
+      status: refund.status,
+      stripeRefundId: refund.stripeRefundId,
+      ...(refund.status === "failed"
+        ? { failureReason: refund.failureReason ?? "refund_failed" }
+        : {}),
+    })
+    .where(
+      and(
+        eq(refunds.status, "pending"),
+        refund.refundId === undefined
+          ? eq(refunds.stripeRefundId, refund.stripeRefundId)
+          : sql`(${refunds.stripeRefundId} = ${refund.stripeRefundId} or (${refunds.id} = ${refund.refundId} and ${refunds.stripeRefundId} is null))`,
+      ),
+    )
+    .returning();
+  return row;
+}
+
+/** Refunds sent to Stripe whose outcome Stripe has not given yet. */
+export async function refundsAwaitingStripe(db: Executor, paymentId: string): Promise<Refund[]> {
+  return db
+    .select()
+    .from(refunds)
     .where(
       and(
         eq(refunds.paymentId, paymentId),
         eq(refunds.status, "pending"),
         sql`${refunds.stripeRefundId} is not null`,
       ),
-    )
-    .returning({ id: refunds.id });
-  return rows.length;
+    );
 }
 
 /**
@@ -157,32 +191,28 @@ export async function confirmPendingRefunds(db: Executor, paymentId: string): Pr
  * is not known after `staleBefore`; a hold on a booking that was confirmed
  * (to capture) or cancelled (to release); a booking still holding its slot
  * with a payment that failed or was cancelled; and paid payments with a
- * refund recorded but not sent to Stripe before `staleBefore`.
+ * refund recorded but not sent before `staleBefore`, or sent but still
+ * pending at Stripe since `refundCheckBefore`.
  */
 export async function paymentsToResume(
   db: Executor,
-  staleBefore: Date,
+  before: { readonly staleBefore: Date; readonly refundCheckBefore: Date },
   limit: number,
 ): Promise<string[]> {
-  const stale = sql`${staleBefore.toISOString()}::timestamptz`;
+  const stale = sql`${before.staleBefore.toISOString()}::timestamptz`;
+  const check = sql`${before.refundCheckBefore.toISOString()}::timestamptz`;
   const rows = await db
-    .selectDistinct({ id: payments.id })
+    .select({ id: payments.id })
     .from(payments)
     .innerJoin(bookings, eq(bookings.id, payments.bookingId))
-    .leftJoin(
-      refunds,
-      and(
-        eq(refunds.paymentId, payments.id),
-        eq(refunds.status, "pending"),
-        isNull(refunds.stripeRefundId),
-        sql`${refunds.createdAt} < ${stale}`,
-      ),
-    )
     .where(
       sql`(${payments.status} = 'pending' and ${payments.updatedAt} < ${stale})
         or (${payments.status} = 'authorised' and ${bookings.status} in ('confirmed', 'cancelled'))
         or (${payments.status} in ('failed', 'cancelled') and ${bookings.status} in ('requested', 'confirmed'))
-        or (${payments.status} = 'paid' and ${refunds.id} is not null)`,
+        or (${payments.status} = 'paid' and exists (
+          select 1 from ${refunds} r where r.payment_id = ${payments.id} and r.status = 'pending'
+            and ((r.stripe_refund_id is null and r.created_at < ${stale})
+              or (r.stripe_refund_id is not null and r.updated_at < ${check}))))`,
     )
     .limit(limit);
   return rows.map((row) => row.id);

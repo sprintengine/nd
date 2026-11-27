@@ -67,9 +67,10 @@ describe("settlementSweep", () => {
       noShowGraceMinutes: 15,
       limit: 200,
     });
-    expect(vi.mocked(paymentData.paymentsToResume).mock.calls[0]?.[1]).toEqual(
-      new Date(NOW.getTime() - 2 * 60_000),
-    );
+    expect(vi.mocked(paymentData.paymentsToResume).mock.calls[0]?.[1]).toEqual({
+      staleBefore: new Date(NOW.getTime() - 2 * 60_000),
+      refundCheckBefore: new Date(NOW.getTime() - 60 * 60_000),
+    });
     expect(env.jobs.sent.map((job) => [job.name, job.options.singletonKey])).toEqual([
       ["reconcile-session", SESSION_ID],
       ["close-stale-session", STALE_ID],

@@ -20,6 +20,7 @@ beforeEach(() => {
   vi.mocked(data.updatePaymentFrom).mockResolvedValue(true);
   vi.mocked(data.updateBookingFrom).mockResolvedValue(true);
   vi.mocked(paymentData.unsentRefunds).mockResolvedValue([]);
+  vi.mocked(paymentData.refundsAwaitingStripe).mockResolvedValue([]);
 });
 
 /** The booking (and its payment, also returned by findPayment) the jobs will read. */
@@ -208,6 +209,37 @@ describe("resume-payment", () => {
     given({ booking: { status: "cancelled" }, payment: { status: "cancelled" } });
     await run();
     expect(data.updateBookingFrom).not.toHaveBeenCalled();
+  });
+
+  it("asks Stripe about a refund it still has pending, and records a failure", async () => {
+    given({ booking: { status: "cancelled" } });
+    vi.mocked(paymentData.refundsAwaitingStripe).mockResolvedValue([
+      {
+        id: "r1",
+        paymentId: PAYMENT_ID,
+        amountCents: 1000,
+        currency: "EUR",
+        reason: "host_cancelled",
+        status: "pending",
+        stripeRefundId: "re_1",
+        issuedById: null,
+        note: null,
+        operationId: null,
+        failureReason: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ]);
+    env.payments.state.retrievedRefund = "failed";
+    await run();
+    expect(env.payments.callsTo("retrieveRefund")).toEqual([
+      { method: "retrieveRefund", input: "re_1" },
+    ]);
+    expect(paymentData.recordStripeRefund).toHaveBeenCalledWith(expect.anything(), {
+      stripeRefundId: "re_1",
+      refundId: "r1",
+      status: "failed",
+    });
   });
 
   it("sends refunds that were recorded but not sent", async () => {

@@ -56,6 +56,7 @@ function fakeSdk() {
       create: vi.fn((): Promise<{ id: string; status: string | null }> =>
         Promise.resolve({ id: "re_1", status: "succeeded" }),
       ),
+      retrieve: vi.fn(() => Promise.resolve({ id: "re_1", status: "canceled" })),
     },
   };
   return { sdk, payments: stripePaymentsFrom(sdk as unknown as PaymentsSdk) };
@@ -285,6 +286,15 @@ describe("stripePaymentsFrom", () => {
       sdk.refunds.create.mockResolvedValueOnce({ id: "re_2", status });
       expect((await payments.refund(input)).status).toBe(expected);
     }
+  });
+
+  it("looks a refund up by id", async () => {
+    const { sdk, payments } = fakeSdk();
+    await expect(payments.retrieveRefund("re_1")).resolves.toEqual({
+      id: "re_1",
+      status: "failed",
+    });
+    expect(sdk.refunds.retrieve).toHaveBeenCalledWith("re_1");
   });
 
   it("deletes a customer, accepting one already gone", async () => {

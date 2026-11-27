@@ -104,6 +104,10 @@ export interface StripePayments {
     readonly metadata: Record<string, string>;
     readonly idempotencyKey: string;
   }): Promise<{ id: string; status: "pending" | "succeeded" | "failed" }>;
+  /** A refund as Stripe has it now. */
+  retrieveRefund(
+    refundId: string,
+  ): Promise<{ id: string; status: "pending" | "succeeded" | "failed" }>;
   /** Deletes a driver's Customer and the cards saved on it. Succeeds if it is already gone. */
   deleteCustomer(customerId: string): Promise<void>;
 }
@@ -158,6 +162,7 @@ export interface PaymentsSdk {
       params: Stripe.RefundCreateParams,
       options?: Stripe.RequestOptions,
     ): Promise<{ id: string; status: string | null }>;
+    retrieve(id: string): Promise<{ id: string; status: string | null }>;
   };
 }
 
@@ -175,6 +180,15 @@ function cardOf(method: PaymentMethodLike): SavedCard | undefined {
 
 const idOf = (value: string | { id: string } | null | undefined): string | null =>
   value === null || value === undefined ? null : typeof value === "string" ? value : value.id;
+
+/** A Stripe refund status as ours: succeeded, failed (or cancelled), or still pending. */
+export function refundStatusOf(
+  status: string | null | undefined,
+): "pending" | "succeeded" | "failed" {
+  if (status === "succeeded") return "succeeded";
+  if (status === "failed" || status === "canceled") return "failed";
+  return "pending";
+}
 
 /** Payments on top of the Stripe SDK. */
 export function stripePaymentsFrom(sdk: PaymentsSdk): StripePayments {
@@ -334,13 +348,12 @@ export function stripePaymentsFrom(sdk: PaymentsSdk): StripePayments {
         },
         { idempotencyKey },
       );
-      const status =
-        refund.status === "succeeded"
-          ? "succeeded"
-          : refund.status === "failed" || refund.status === "canceled"
-            ? "failed"
-            : "pending";
-      return { id: refund.id, status };
+      return { id: refund.id, status: refundStatusOf(refund.status) };
+    },
+
+    async retrieveRefund(refundId) {
+      const refund = await sdk.refunds.retrieve(refundId);
+      return { id: refund.id, status: refundStatusOf(refund.status) };
     },
 
     async deleteCustomer(customerId) {
@@ -375,5 +388,6 @@ export const unconfiguredStripePayments: StripePayments = {
   cancelAuthorisation: unavailable,
   capture: unavailable,
   refund: unavailable,
+  retrieveRefund: unavailable,
   deleteCustomer: unavailable,
 };

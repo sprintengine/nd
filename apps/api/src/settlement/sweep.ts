@@ -25,6 +25,9 @@ const SWEEP_BATCH = 200;
 /** A charge whose outcome is not known is resumed once it is this old (its own job runs first). */
 const RESUME_AFTER_MS = 2 * 60_000;
 
+/** A refund Stripe still has pending is looked up again after this long. */
+const REFUND_CHECK_AFTER_MS = 60 * 60_000;
+
 /** How many jobs of each kind a sweep queued. */
 export interface SweepResult {
   readonly reconcile: number;
@@ -64,7 +67,14 @@ export async function settlementSweep(services: Services): Promise<SweepResult> 
   for (const bookingId of due.noShow) {
     await jobs.send(noShowJob, { bookingId }, { singletonKey: bookingId });
   }
-  const resume = await paymentsToResume(db, new Date(now.getTime() - RESUME_AFTER_MS), SWEEP_BATCH);
+  const resume = await paymentsToResume(
+    db,
+    {
+      staleBefore: new Date(now.getTime() - RESUME_AFTER_MS),
+      refundCheckBefore: new Date(now.getTime() - REFUND_CHECK_AFTER_MS),
+    },
+    SWEEP_BATCH,
+  );
   for (const paymentId of resume) {
     await jobs.send(resumePaymentJob, { paymentId }, { singletonKey: paymentId });
   }

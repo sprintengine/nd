@@ -730,6 +730,58 @@ describe("POST /webhooks/stripe", () => {
       .where(eq(hosts.userId, hostUserId));
   });
 
+  it("records each refund's outcome from Stripe, even before its Stripe id is saved", async () => {
+    const chargerId = await listCharger();
+    const body = await booked(chargerId, nightIn(12), 2);
+    const payment = await paymentOf(body.id);
+    const [early, sent] = await h.database.db
+      .insert(refunds)
+      .values([
+        { paymentId: payment.id, amountCents: 100, currency: "EUR", reason: "support" },
+        {
+          paymentId: payment.id,
+          amountCents: 200,
+          currency: "EUR",
+          reason: "support",
+          stripeRefundId: "re_sent_1",
+        },
+      ])
+      .returning();
+    const { payload, signature } = signed({
+      id: `evt_${randomBytes(6).toString("hex")}`,
+      object: "event",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_1",
+          object: "charge",
+          payment_intent: payment.stripePaymentIntentId,
+          refunds: {
+            data: [
+              { id: "re_early_1", status: "succeeded", metadata: { refundId: early?.id } },
+              {
+                id: "re_sent_1",
+                status: "failed",
+                metadata: {},
+                failure_reason: "lost_or_stolen_card",
+              },
+            ],
+          },
+        },
+      },
+    });
+    expect((await postWebhook(payload, signature)).json()).toMatchObject({ outcome: "processed" });
+    const rows = await refundsOf(payment.id);
+    expect(rows.find((row) => row.id === early?.id)).toMatchObject({
+      status: "succeeded",
+      stripeRefundId: "re_early_1",
+    });
+    expect(rows.find((row) => row.id === sent?.id)).toMatchObject({
+      status: "failed",
+      failureReason: "lost_or_stolen_card",
+    });
+  });
+
   it("records PaymentIntent events against the payment", async () => {
     const chargerId = await listCharger({ instantBook: false });
     const body = await booked(chargerId, nightIn(8), 2);

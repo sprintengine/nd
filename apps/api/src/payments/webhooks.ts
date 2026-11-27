@@ -10,8 +10,9 @@ import {
   updatePaymentFrom,
 } from "../data/bookings.ts";
 import { closeCardDispute, insertCardDispute } from "../data/disputes.ts";
-import { confirmPendingRefunds } from "../data/payments.ts";
+import { recordStripeRefund } from "../data/payments.ts";
 import type { Services } from "../services.ts";
+import { refundStatusOf } from "../stripe/payments.ts";
 
 // Stripe webhooks: signature checked against the raw body, each event id
 // processed once (recorded in the same transaction as its effects), and
@@ -94,6 +95,32 @@ async function applyPaymentIntent(
   }
 }
 
+/**
+ * Records Stripe's status of each refund, matched by its Stripe id or, when
+ * the event comes before that id is saved, by our refund id in its metadata.
+ */
+async function applyRefunds(
+  services: Services,
+  refunds: readonly Pick<Stripe.Refund, "id" | "status" | "metadata" | "failure_reason">[],
+): Promise<boolean> {
+  let matched = false;
+  for (const refund of refunds) {
+    const status = refundStatusOf(refund.status);
+    const row = await recordStripeRefund(services.db, {
+      stripeRefundId: refund.id,
+      refundId: refund.metadata?.refundId,
+      status,
+      failureReason: refund.failure_reason ?? null,
+    });
+    if (row === undefined) continue;
+    matched = true;
+    if (status === "failed") {
+      services.log.error({ refundId: row.id }, "a refund failed at Stripe; needs support");
+    }
+  }
+  return matched;
+}
+
 /** Records what a card dispute's creation or closing says. */
 async function applyDispute(services: Services, event: Stripe.Event): Promise<boolean> {
   if (event.type === "charge.dispute.closed") {
@@ -128,9 +155,14 @@ async function apply(services: Services, event: Stripe.Event): Promise<boolean> 
     return applyPaymentIntent(services, event.type, event.data.object);
   }
   if (event.type === "charge.refunded") {
-    const payment = await paymentOf(services, idOf(event.data.object.payment_intent), undefined);
-    if (payment === undefined) return false;
-    return (await confirmPendingRefunds(services.db, payment.id)) > 0;
+    return applyRefunds(services, event.data.object.refunds?.data ?? []);
+  }
+  if (
+    event.type === "refund.updated" ||
+    event.type === "refund.failed" ||
+    event.type === "charge.refund.updated"
+  ) {
+    return applyRefunds(services, [event.data.object]);
   }
   if (event.type === "charge.dispute.created" || event.type === "charge.dispute.closed") {
     return applyDispute(services, event);

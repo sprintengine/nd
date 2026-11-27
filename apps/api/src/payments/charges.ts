@@ -1,7 +1,14 @@
 import type { RefundReason } from "@nd/domain";
 
 import { type Payment, updatePaymentFrom } from "../data/bookings.ts";
-import { insertRefund, type Refund, unsentRefunds, updatePendingRefund } from "../data/payments.ts";
+import {
+  insertRefund,
+  recordStripeRefund,
+  type Refund,
+  refundsAwaitingStripe,
+  unsentRefunds,
+  updatePendingRefund,
+} from "../data/payments.ts";
 import { HttpProblem } from "../http/problem.ts";
 import type { Services } from "../services.ts";
 
@@ -179,7 +186,39 @@ export async function sendRefund(
     stripeRefundId: result.id,
     ...(result.status === "failed" ? { failureReason: "refund_failed" } : {}),
   });
+  if (result.status === "failed") refundFailed(services, payment, refund.id);
   return result.status;
+}
+
+/** Logs a refund Stripe could not make: support has to settle it with the driver. */
+function refundFailed(services: Services, payment: Payment, refundId: string): void {
+  services.log.error(
+    { bookingId: payment.bookingId, refundId },
+    "a refund failed at Stripe; needs support",
+  );
+}
+
+/**
+ * Asks Stripe for the outcome of each refund it has not settled yet, and
+ * records it; a refund still pending is touched, so the sweep waits before
+ * asking again.
+ */
+export async function checkPendingRefunds(services: Services, payment: Payment): Promise<void> {
+  for (const refund of await refundsAwaitingStripe(services.db, payment.id)) {
+    const stripeRefundId = refund.stripeRefundId ?? "";
+    const found = await attempt(
+      services,
+      { bookingId: payment.bookingId, refundId: refund.id },
+      () => services.payments.retrieveRefund(stripeRefundId),
+    );
+    if (found === undefined) continue;
+    await recordStripeRefund(services.db, {
+      stripeRefundId,
+      refundId: refund.id,
+      status: found.status,
+    });
+    if (found.status === "failed") refundFailed(services, payment, refund.id);
+  }
 }
 
 /** Sends every refund of a paid payment that has been recorded but not sent. */

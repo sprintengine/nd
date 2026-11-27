@@ -213,6 +213,10 @@ export function statefulStripeMock() {
           refunds.push({ ...params, amount });
           return { id: `${refund.id}_${String(refunds.length)}`, status: "succeeded" };
         }),
+      retrieve: async (id) => {
+        await sdk.refunds.retrieve(id.replace(/_\d+$/, ""));
+        return { id, status: "succeeded" };
+      },
     },
   };
 

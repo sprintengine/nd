@@ -267,6 +267,8 @@ export function fakePayments() {
     capture: "ok" as "ok" | "lapsed" | "error",
     release: "ok" as "ok" | "error",
     refund: "succeeded" as "succeeded" | "pending" | "error",
+    /** What Stripe says about a refund it was asked about later. */
+    retrievedRefund: "succeeded" as "succeeded" | "pending" | "failed",
     deleteCustomer: "ok" as "ok" | "error",
     intents: 0,
   };
@@ -331,6 +333,10 @@ export function fakePayments() {
       record("refund", input);
       if (state.refund === "error") return Promise.reject(new Error("network down"));
       return Promise.resolve({ id: `re_${input.idempotencyKey}`, status: state.refund });
+    },
+    retrieveRefund: (refundId) => {
+      record("retrieveRefund", refundId);
+      return Promise.resolve({ id: refundId, status: state.retrievedRefund });
     },
     deleteCustomer: (customerId) => {
       record("deleteCustomer", customerId);

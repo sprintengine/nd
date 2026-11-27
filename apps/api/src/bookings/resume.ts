@@ -3,6 +3,7 @@ import { unsentRefunds } from "../data/payments.ts";
 import {
   captureHold,
   chargeBooking,
+  checkPendingRefunds,
   type MoneyOutcome,
   releaseHold,
   sendUnsentRefunds,
@@ -73,6 +74,7 @@ export async function resumePayment(services: Services, paymentId: string): Prom
   }
   if (payment.status === "paid") {
     await sendUnsentRefunds(services, payment);
+    await checkPendingRefunds(services, payment);
     if ((await unsentRefunds(services.db, paymentId)).length > 0) {
       throw new StillUnknownError(`refunds of ${paymentId} unanswered`);
     }
