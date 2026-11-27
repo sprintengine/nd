@@ -2,7 +2,9 @@ import { type Executor, hashChargerSecret } from "@nd/db";
 import {
   chargerStatusSchema,
   connectorTypeSchema,
+  currencyForCountry,
   currencySchema,
+  hostCountrySchema,
   hostPayoutStatusSchema,
 } from "@nd/domain";
 import type { FastifyInstance } from "fastify";
@@ -53,7 +55,11 @@ const latLngSchema = z.object({
 
 const createHostBody = z
   .object({
-    country: z.enum(["IE", "GB"]).default("IE").describe("Country of the host's payouts account"),
+    country: hostCountrySchema
+      .default("IE")
+      .describe(
+        "Country of the host's payouts account, fixed when it is created. Listings are priced in its currency: EUR for IE, GBP for GB",
+      ),
   })
   .nullish();
 
@@ -201,7 +207,7 @@ async function hostChargerView(db: Executor, chargerId: string) {
     timezone: row.timezone,
     acceptingBookings: row.acceptingBookings,
     pricePerHourCents: first?.pricePerHourCents ?? null,
-    currency: first?.currency ?? "EUR",
+    currency: first?.currency ?? row.currency,
     kwhCap: first?.kwhCap ?? null,
     instantBook: first?.instantBook ?? false,
     availability: rules.map((rule) => ({
@@ -247,14 +253,17 @@ export function registerHostRoutes(app: FastifyInstance, deps: AppDeps): void {
       let accountId = host.stripeAccountId;
       let payoutStatus = host.payoutStatus;
       if (accountId === null) {
-        const account = await stripe.createExpressAccount({
-          hostId: host.id,
-          email,
-          country: request.body?.country ?? "IE",
-        });
+        const country = request.body?.country ?? "IE";
+        const account = await stripe.createExpressAccount({ hostId: host.id, email, country });
         accountId = account.id;
         if (payoutStatus === "not_started") payoutStatus = "pending";
-        await saveStripeAccount(db, host.id, accountId, payoutStatus);
+        await inTransaction(db, (tx) =>
+          saveStripeAccount(tx, host.id, {
+            stripeAccountId: account.id,
+            payoutStatus,
+            currency: currencyForCountry(country),
+          }),
+        );
       }
       const link = await stripe.createAccountLink({
         accountId,
@@ -432,6 +441,7 @@ export function registerHostRoutes(app: FastifyInstance, deps: AppDeps): void {
           await replaceRules(
             tx,
             chargerId,
+            charger.currency,
             patch.availability.map((window) => ({
               weekday: window.weekday,
               startTime: window.start,

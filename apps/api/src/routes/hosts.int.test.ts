@@ -1,4 +1,10 @@
-import { chargers, findChargerCredentials, hosts, verifyChargerSecret } from "@nd/db";
+import {
+  availabilityRules,
+  chargers,
+  findChargerCredentials,
+  hosts,
+  verifyChargerSecret,
+} from "@nd/db";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -320,6 +326,29 @@ describe("PATCH /hosts/chargers/:id", () => {
       acceptingBookings: false,
     });
     expect(unpublished.json()).toMatchObject({ acceptingBookings: false });
+  });
+
+  it("prices a UK host's windows in sterling", async () => {
+    const uk = await h.user("rory@example.com", "+447700900123");
+    const created = await call("POST", "/hosts", uk, { country: "GB" });
+    expect(created.statusCode).toBe(200);
+    const { hostId } = created.json<{ hostId: string }>();
+    expect((await h.database.db.select().from(hosts).where(eq(hosts.id, hostId)))[0]).toMatchObject(
+      { currency: "GBP" },
+    );
+
+    const { chargerId } = await connect(uk, "21238080");
+    const response = await call("PATCH", `/hosts/chargers/${chargerId}`, uk, {
+      pricePerHourCents: 200,
+      availability,
+    });
+    expect(response.json()).toMatchObject({ currency: "GBP", pricePerHourCents: 200 });
+    const rules = await h.database.db
+      .select({ currency: availabilityRules.currency })
+      .from(availabilityRules)
+      .where(eq(availabilityRules.chargerId, chargerId));
+    expect(rules).toHaveLength(7);
+    expect(new Set(rules.map((rule) => rule.currency))).toEqual(new Set(["GBP"]));
   });
 
   it("refuses to publish below firmware 5.794 or without payouts", async () => {

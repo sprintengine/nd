@@ -20,11 +20,7 @@ export async function dashboardHost(db: Executor, userId: string) {
         (select c.timezone from chargers c where c.host_id = h.id order by c.created_at, c.id limit 1),
         'Europe/Dublin'
       ) as timezone,
-      coalesce(
-        (select r.currency from availability_rules r join chargers c on c.id = r.charger_id
-          where c.host_id = h.id order by c.created_at, r.created_at limit 1),
-        'EUR'
-      ) as currency
+      h.currency
     from hosts h where h.user_id = ${userId}
   `);
   return result.rows[0];

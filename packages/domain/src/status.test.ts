@@ -11,13 +11,16 @@ import {
   CONNECTOR_TYPES,
   connectorTypeSchema,
   CURRENCIES,
+  currencyForCountry,
   currencySchema,
   DEVICE_PLATFORMS,
   devicePlatformSchema,
   DISPUTE_STATUSES,
   disputeStatusSchema,
   holdsSlot,
+  HOST_COUNTRIES,
   HOST_PAYOUT_STATUSES,
+  hostCountrySchema,
   hostPayoutStatusSchema,
   isOpenSession,
   OCPP_MESSAGE_DIRECTIONS,
@@ -55,7 +58,15 @@ const vocabularies: [string, readonly string[], z.ZodType][] = [
   ["OCPP message type", OCPP_MESSAGE_TYPES, ocppMessageTypeSchema],
   ["device platform", DEVICE_PLATFORMS, devicePlatformSchema],
   ["currency", CURRENCIES, currencySchema],
+  ["host country", HOST_COUNTRIES, hostCountrySchema],
 ];
+
+describe("currencyForCountry", () => {
+  it("prices Irish hosts in euro and UK hosts in sterling", () => {
+    expect(currencyForCountry("IE")).toBe("EUR");
+    expect(currencyForCountry("GB")).toBe("GBP");
+  });
+});
 
 describe.each(vocabularies)("%s", (_name, values, schema) => {
   it("has unique values", () => {

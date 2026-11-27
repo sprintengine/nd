@@ -110,6 +110,7 @@ erDiagram
     uuid user_id FK
     text stripe_account_id
     text payout_status
+    text currency "EUR | GBP, from the payouts country"
     bool tax_details_complete
     tstzrange night_rate_window "cheap tariff hours, optional"
     int max_sessions_per_day
@@ -213,7 +214,7 @@ erDiagram
 
 Rules the schema enforces:
 
-- Money is stored as integers in minor units with an explicit currency.
+- Money is stored as integers in minor units with an explicit currency. A host's currency follows the country of their payouts account (Ireland: EUR, UK: GBP), chosen at `POST /hosts`; their availability rules, and so the quotes, payments and transfers of bookings on their chargers, use it.
 - `bookings.slot` has an exclusion constraint per charger, so two confirmed or active bookings can never overlap.
 - `bookings.id_tag` is generated server-side from a cryptographic random source, is unique, at most 20 characters (the OCPP limit) and valid only inside its booking window. It is the only credential a driver needs; drivers never learn the host's own tag or PIN.
 - `chargers.location` is `geography(Point, 4326)` with a GiST index; search uses `ST_DWithin` and ranks by distance, then rating. Until a booking is confirmed, search returns the location rounded to about 150 m and never the address.

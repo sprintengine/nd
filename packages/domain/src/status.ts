@@ -159,6 +159,16 @@ export const CURRENCIES = ["EUR", "GBP"] as const;
 export type Currency = (typeof CURRENCIES)[number];
 export const currencySchema = z.enum(CURRENCIES);
 
+/** Countries a host can be paid out in (the country of their Stripe account). */
+export const HOST_COUNTRIES = ["IE", "GB"] as const;
+export type HostCountry = (typeof HOST_COUNTRIES)[number];
+export const hostCountrySchema = z.enum(HOST_COUNTRIES);
+
+/** The currency a host's listings are priced, charged and paid out in. */
+export function currencyForCountry(country: HostCountry): Currency {
+  return country === "GB" ? "GBP" : "EUR";
+}
+
 /** Whether a booking in `status` holds its charger for the slot. */
 export function holdsSlot(status: BookingStatus): boolean {
   return (SLOT_HOLDING_BOOKING_STATUSES as readonly BookingStatus[]).includes(status);

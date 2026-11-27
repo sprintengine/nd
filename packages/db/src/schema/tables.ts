@@ -83,6 +83,8 @@ export const hosts = pgTable(
       .references(() => users.id),
     stripeAccountId: text("stripe_account_id").unique(),
     payoutStatus: hostPayoutStatus("payout_status").notNull().default("not_started"),
+    /** Currency of the host's payouts account; their listings are priced and charged in it. */
+    currency: currency("currency").notNull().default("EUR"),
     /** Set when `host_tax_details` holds a complete record; transfers are held until then. */
     taxDetailsComplete: boolean("tax_details_complete").notNull().default(false),
     /** Optional cheap night-rate window, in the charger's local time. */

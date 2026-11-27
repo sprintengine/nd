@@ -3906,7 +3906,7 @@
                     "properties": {
                       "country": {
                         "default": "IE",
-                        "description": "Country of the host's payouts account",
+                        "description": "Country of the host's payouts account, fixed when it is created. Listings are priced in its currency: EUR for IE, GBP for GB",
                         "type": "string",
                         "enum": ["IE", "GB"]
                       }

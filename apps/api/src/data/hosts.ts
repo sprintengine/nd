@@ -8,7 +8,7 @@ import {
   hosts,
 } from "@nd/db";
 import type { Currency, HostPayoutStatus } from "@nd/domain";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 // Reads and writes behind the /hosts routes. Integration tests cover them
 // against Postgres. Ordinary reads never select `ocpp_auth_hash`.
@@ -23,13 +23,29 @@ export async function ensureHost(db: Executor, userId: string): Promise<Host> {
 
 export { findHostByUserId as findHost };
 
+/**
+ * Saves the host's new Stripe account and the currency of its country. Rules
+ * already set up (before the account existed) are moved to that currency.
+ */
 export async function saveStripeAccount(
   db: Executor,
   hostId: string,
-  stripeAccountId: string,
-  payoutStatus: HostPayoutStatus,
+  account: { stripeAccountId: string; payoutStatus: HostPayoutStatus; currency: Currency },
 ): Promise<void> {
-  await db.update(hosts).set({ stripeAccountId, payoutStatus }).where(eq(hosts.id, hostId));
+  const { stripeAccountId, payoutStatus, currency } = account;
+  await db
+    .update(hosts)
+    .set({ stripeAccountId, payoutStatus, currency })
+    .where(eq(hosts.id, hostId));
+  await db
+    .update(availabilityRules)
+    .set({ currency })
+    .where(
+      inArray(
+        availabilityRules.chargerId,
+        db.select({ id: chargers.id }).from(chargers).where(eq(chargers.hostId, hostId)),
+      ),
+    );
 }
 
 /** Chargers registered with a serial number, by any host. */
@@ -90,6 +106,7 @@ export async function findOwnedCharger(
       acceptingBookings: chargers.acceptingBookings,
       hostId: hosts.id,
       payoutStatus: hosts.payoutStatus,
+      currency: hosts.currency,
     })
     .from(chargers)
     .innerJoin(hosts, eq(hosts.id, chargers.hostId))
@@ -137,15 +154,18 @@ export interface NewRule {
   readonly instantBook: boolean;
 }
 
-/** Replaces every availability rule of a charger. */
+/** Replaces every availability rule of a charger, priced in the host's currency. */
 export async function replaceRules(
   db: Executor,
   chargerId: string,
+  currency: Currency,
   rules: readonly NewRule[],
 ): Promise<void> {
   await db.delete(availabilityRules).where(eq(availabilityRules.chargerId, chargerId));
   if (rules.length > 0) {
-    await db.insert(availabilityRules).values(rules.map((rule) => ({ chargerId, ...rule })));
+    await db
+      .insert(availabilityRules)
+      .values(rules.map((rule) => ({ chargerId, currency, ...rule })));
   }
 }
 
@@ -195,6 +215,7 @@ export async function findHostChargerView(db: Executor, chargerId: string) {
       timezone: chargers.timezone,
       acceptingBookings: chargers.acceptingBookings,
       payoutStatus: hosts.payoutStatus,
+      currency: hosts.currency,
       maxSessionsPerDay: hosts.maxSessionsPerDay,
       nightRateStart: hosts.nightRateStart,
       nightRateEnd: hosts.nightRateEnd,

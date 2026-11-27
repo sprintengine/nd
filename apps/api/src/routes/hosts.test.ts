@@ -29,6 +29,7 @@ const owned = {
   acceptingBookings: false,
   hostId: host.id,
   payoutStatus: "enabled",
+  currency: "GBP",
 } satisfies data.OwnedCharger;
 
 const view = {
@@ -45,6 +46,7 @@ const view = {
   timezone: "Europe/Dublin",
   acceptingBookings: true,
   payoutStatus: "enabled",
+  currency: "EUR",
   maxSessionsPerDay: 2,
   nightRateStart: "23:00:00",
   nightRateEnd: "08:00:00",
@@ -124,12 +126,11 @@ describe("POST /hosts", () => {
       refreshUrl: "http://localhost:5173/host/payouts?stripe=refresh",
       returnUrl: "http://localhost:5173/host/payouts?stripe=return",
     });
-    expect(data.saveStripeAccount).toHaveBeenCalledWith(
-      expect.anything(),
-      host.id,
-      "acct_test_1",
-      "pending",
-    );
+    expect(data.saveStripeAccount).toHaveBeenCalledWith(expect.anything(), host.id, {
+      stripeAccountId: "acct_test_1",
+      payoutStatus: "pending",
+      currency: "GBP",
+    });
   });
 
   it("reuses an existing account and keeps its payout status", async () => {
@@ -283,7 +284,7 @@ describe("PATCH /hosts/chargers/:id", () => {
       availability: [{ weekday: 3, start: "21:00", end: "07:00" }],
     });
     expect(response.statusCode).toBe(200);
-    expect(data.replaceRules).toHaveBeenCalledWith(expect.anything(), CHARGER_ID, [
+    expect(data.replaceRules).toHaveBeenCalledWith(expect.anything(), CHARGER_ID, "GBP", [
       {
         weekday: 3,
         startTime: "21:00",
@@ -329,7 +330,7 @@ describe("PATCH /hosts/chargers/:id", () => {
       availability: [{ weekday: 1, start: "20:00", end: "08:00" }],
     });
     expect(priced.statusCode).toBe(200);
-    expect(vi.mocked(data.replaceRules).mock.calls[0]?.[2]).toEqual([
+    expect(vi.mocked(data.replaceRules).mock.calls[0]?.[3]).toEqual([
       {
         weekday: 1,
         startTime: "20:00",
