@@ -398,6 +398,8 @@ export const refunds = pgTable(
     /** Who issued a support refund, and why. */
     issuedById: text("issued_by_id").references(() => users.id),
     note: text("note"),
+    /** The caller's id for a support refund, so a retried request returns the same refund. */
+    operationId: text("operation_id"),
     failureReason: text("failure_reason"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -408,6 +410,7 @@ export const refunds = pgTable(
     uniqueIndex("refunds_payment_reason_unique")
       .on(table.paymentId, table.reason)
       .where(sql`${table.reason} <> 'support'`),
+    unique("refunds_payment_operation_unique").on(table.paymentId, table.operationId),
     check("refunds_amount_positive", sql`${table.amountCents} > 0`),
   ],
 );

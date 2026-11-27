@@ -19,6 +19,12 @@ const refundBody = z.object({
     .optional()
     .describe("What to refund; the rest of what was paid when omitted (a full refund)"),
   note: z.string().trim().min(1).max(1000).describe("Why, for the record"),
+  operationId: z
+    .string()
+    .trim()
+    .min(8)
+    .max(100)
+    .describe("The caller's id for this refund: a retried request with it returns the same refund"),
 });
 
 const refundResponse = z.object({
@@ -55,7 +61,7 @@ export function registerAdminRoutes(
       schema: {
         summary: "Refund a booking",
         description:
-          "Support refunds a paid booking in full or in part, for anything the automatic rules do not cover (a session that went partly wrong, a dispute). The host's share and the application fee are reversed in proportion. Never more than what is left to refund (422). Admins only (ADMIN_USER_IDS).",
+          "Support refunds a paid booking in full or in part, for anything the automatic rules do not cover (a session that went partly wrong, a dispute). The host's share and the application fee are reversed in proportion. Never more than what is left to refund (422). A retried request with the same `operationId` returns the refund it already made. Admins only (ADMIN_USER_IDS).",
         tags: ["admin"],
         params: bookingParams,
         body: refundBody,
@@ -77,6 +83,7 @@ export function registerAdminRoutes(
         reason: "support",
         issuedById: sessionOf(request).userId,
         note: request.body.note,
+        operationId: request.body.operationId,
       });
       if (refund === undefined) {
         throw new HttpProblem(

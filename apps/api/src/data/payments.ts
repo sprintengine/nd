@@ -18,8 +18,9 @@ const LIVE_REFUND = ne(refunds.status, "failed");
  * payment row is locked, so two refunds cannot both pass the check.
  * `"remainder"` refunds whatever is left (after earlier refunds, pending ones
  * included), and records nothing when nothing is. An automatic reason is
- * recorded at most once per payment: asking again returns the refund already
- * recorded. Resolves to undefined when the amount is more than is left.
+ * recorded at most once per payment, and a support refund once per
+ * `operationId`: asking again returns the refund already recorded. Resolves
+ * to undefined when the amount is more than is left.
  */
 export function insertRefund(
   db: Executor,
@@ -29,6 +30,8 @@ export function insertRefund(
     readonly reason: RefundReason;
     readonly issuedById?: string;
     readonly note?: string;
+    /** The caller's id for this refund; a retry with the same id returns it. */
+    readonly operationId?: string;
   },
 ): Promise<Refund | undefined> {
   return db.transaction(async (tx) => {
@@ -38,11 +41,17 @@ export function insertRefund(
       .where(eq(payments.id, input.paymentId))
       .for("update");
     if (payment === undefined) throw new Error(`no payment ${input.paymentId}`);
-    if (input.reason !== "support") {
+    const same =
+      input.operationId !== undefined
+        ? eq(refunds.operationId, input.operationId)
+        : input.reason !== "support"
+          ? eq(refunds.reason, input.reason)
+          : undefined;
+    if (same !== undefined) {
       const [existing] = await tx
         .select()
         .from(refunds)
-        .where(and(eq(refunds.paymentId, input.paymentId), eq(refunds.reason, input.reason)))
+        .where(and(eq(refunds.paymentId, input.paymentId), same))
         .limit(1);
       if (existing !== undefined) return existing;
     }
@@ -58,6 +67,7 @@ export function insertRefund(
         reason: input.reason,
         issuedById: input.issuedById ?? null,
         note: input.note ?? null,
+        operationId: input.operationId ?? null,
       })
       .returning();
     if (row === undefined) throw new Error("refund not inserted");

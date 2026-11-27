@@ -57,6 +57,7 @@ const refundRow = (overrides: Partial<paymentData.Refund> = {}): paymentData.Ref
   stripeRefundId: "re_1",
   issuedById: null,
   note: null,
+  operationId: null,
   failureReason: null,
   createdAt: new Date("2027-01-13T09:00:00Z"),
   updatedAt: new Date("2027-01-13T09:00:00Z"),
@@ -272,18 +273,26 @@ describe("POST /admin/bookings/:id/refund", () => {
     unit = startUnitApp();
     app = unit.app;
     signInAs(app);
-    const response = await inject("POST", url, { amountCents: 500, note: "x" });
+    const response = await inject("POST", url, {
+      amountCents: 500,
+      note: "x",
+      operationId: "op-12345678",
+    });
     expect(response.json()).toMatchObject({ status: 403, code: "admin-only" });
     const anonymous = await app.inject({
       method: "POST",
       url,
-      payload: { amountCents: 500, note: "x" },
+      payload: { amountCents: 500, note: "x", operationId: "op-12345678" },
     });
     expect(anonymous.statusCode).toBe(401);
   });
 
   it("refunds part of a booking, reversing the host's share and the fee", async () => {
-    const response = await inject("POST", url, { amountCents: 500, note: "Half the night lost" });
+    const response = await inject("POST", url, {
+      amountCents: 500,
+      note: "Half the night lost",
+      operationId: "op-12345678",
+    });
     expect(response.statusCode, response.body).toBe(201);
     expect(response.json()).toEqual({
       bookingId: BOOKING_ID,
@@ -297,6 +306,7 @@ describe("POST /admin/bookings/:id/refund", () => {
       reason: "support",
       issuedById: USER_ID,
       note: "Half the night lost",
+      operationId: "op-12345678",
     });
     expect(unit.payments.callsTo("refund")[0]?.input).toMatchObject({
       paymentIntentId: "pi_1",
@@ -306,25 +316,41 @@ describe("POST /admin/bookings/:id/refund", () => {
   });
 
   it("refunds the whole price when no amount is given, and never more than is left", async () => {
-    await inject("POST", url, { note: "Charger broke" });
+    await inject("POST", url, { note: "Charger broke", operationId: "op-12345678" });
     expect(vi.mocked(paymentData.insertRefund).mock.calls[0]?.[1]).toMatchObject({
       amountCents: 1000,
     });
     vi.mocked(paymentData.insertRefund).mockResolvedValue(undefined);
-    const tooMuch = await inject("POST", url, { amountCents: 900, note: "x" });
+    const tooMuch = await inject("POST", url, {
+      amountCents: 900,
+      note: "x",
+      operationId: "op-12345679",
+    });
     expect(tooMuch.json()).toMatchObject({ status: 422, code: "refund-too-large" });
     expect(tooMuch.json()).not.toHaveProperty("detail");
-    expect((await inject("POST", url, { note: "x" })).json()).toMatchObject({
+    expect(
+      (await inject("POST", url, { note: "x", operationId: "op-12345670" })).json(),
+    ).toMatchObject({
       detail: "Part of this booking has been refunded already; give the amount left.",
     });
   });
 
+  it("needs an operation id, so a retried request cannot refund twice", async () => {
+    const response = await inject("POST", url, { amountCents: 500, note: "x" });
+    expect(response.statusCode).toBe(400);
+    expect(paymentData.insertRefund).not.toHaveBeenCalled();
+  });
+
   it("is 404 for no booking and 409 for one not paid", async () => {
     vi.mocked(bookingData.findBookingDetail).mockResolvedValue(undefined);
-    expect((await inject("POST", url, { note: "x" })).statusCode).toBe(404);
+    expect((await inject("POST", url, { note: "x", operationId: "op-12345670" })).statusCode).toBe(
+      404,
+    );
     vi.mocked(bookingData.findBookingDetail).mockResolvedValue(
       bookingDetail("user-cian", { payment: { status: "cancelled" } }),
     );
-    expect((await inject("POST", url, { note: "x" })).json()).toMatchObject({ code: "not-paid" });
+    expect(
+      (await inject("POST", url, { note: "x", operationId: "op-12345670" })).json(),
+    ).toMatchObject({ code: "not-paid" });
   });
 });

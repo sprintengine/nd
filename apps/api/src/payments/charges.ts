@@ -202,6 +202,7 @@ export async function refundPayment(
     readonly reason: RefundReason;
     readonly issuedById?: string;
     readonly note?: string;
+    readonly operationId?: string;
   },
 ): Promise<Refund | undefined> {
   const refund = await insertRefund(services.db, { paymentId: payment.id, ...input });

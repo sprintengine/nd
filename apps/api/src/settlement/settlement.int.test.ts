@@ -425,17 +425,23 @@ describe("reconciliation", () => {
     // Support refunds part of it; only admins may, and never more than was paid.
     const path = `/admin/bookings/${mismatch.bookingId}/refund`;
     const note = "Charger stopped early; half refunded";
-    expect((await call("POST", path, driver, { amountCents: 500, note })).statusCode).toBe(403);
-    expect((await call("POST", path, stranger, { amountCents: 1001, note })).json()).toMatchObject({
-      code: "refund-too-large",
-    });
-    const refunded = await call("POST", path, stranger, { amountCents: 500, note });
+    const operationId = `support-${randomBytes(6).toString("hex")}`;
+    const ask = (amountCents: number, id = operationId) => ({ amountCents, note, operationId: id });
+    expect((await call("POST", path, driver, ask(500))).statusCode).toBe(403);
+    expect(
+      (await call("POST", path, stranger, ask(1001, `${operationId}-big`))).json(),
+    ).toMatchObject({ code: "refund-too-large" });
+    const refunded = await call("POST", path, stranger, ask(500));
     expect(refunded.statusCode, refunded.body).toBe(201);
     expect(refunded.json()).toMatchObject({ amountCents: 500, status: "succeeded" });
+    // A retried request (same operation id) returns the same refund: nothing more is refunded.
+    const retried = await call("POST", path, stranger, ask(500));
+    expect(retried.json()).toMatchObject({ amountCents: 500, status: "succeeded" });
+    expect(await moneyMoved(mismatch.bookingId)).toEqual({ captures: 0, refunds: 1 });
     expect(await refundsOf(mismatch.bookingId)).toMatchObject([
-      { amountCents: 500, reason: "support", note, issuedById: admins[0] },
+      { amountCents: 500, reason: "support", note, issuedById: admins[0], operationId },
     ]);
-    expect((await call("POST", path, stranger, { amountCents: 501, note })).statusCode).toBe(422);
+    expect((await call("POST", path, stranger, ask(501, `${operationId}-2`))).statusCode).toBe(422);
     const receipt = await call("GET", `/bookings/${mismatch.bookingId}/receipt`, hostCookie);
     expect(receipt.json()).toMatchObject({
       refundedCents: 500,

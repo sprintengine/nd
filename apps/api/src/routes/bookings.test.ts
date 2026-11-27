@@ -100,6 +100,7 @@ beforeEach(() => {
                 stripeRefundId: null,
                 issuedById: null,
                 note: null,
+                operationId: null,
                 failureReason: null,
                 createdAt: NOW,
                 updatedAt: NOW,

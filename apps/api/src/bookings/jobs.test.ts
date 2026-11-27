@@ -222,6 +222,7 @@ describe("resume-payment", () => {
       stripeRefundId: null,
       issuedById: null,
       note: null,
+      operationId: null,
       failureReason: null,
       createdAt: new Date(),
       updatedAt: new Date(),
