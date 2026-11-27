@@ -59,6 +59,11 @@ services:
       # Not a real secret: webhooks in this stack are signed with it by the test.
       STRIPE_WEBHOOK_SECRET: whsec_e2e_not_a_real_secret
       PLATFORM_FEE_BPS: "0"
+      CARD_FEE_BPS: "150"
+      CARD_FEE_FIXED_CENTS: "25"
+      # The scenarios book many times from one driver.
+      BOOKING_RATE_LIMIT_PER_HOUR: "1000"
+      TAX_RECORD_RETENTION_YEARS: "6"
       # No real user; the e2e stack has no support staff.
       ADMIN_USER_IDS: e2e-support-placeholder
       # No messages leave the stack: the capture senders keep them for
@@ -75,6 +80,7 @@ services:
       SESSION_START_TIMEOUT_SECONDS: "8"
       STALE_SESSION_GRACE_MINUTES: "1"
       MIN_BOOKING_MINUTES: "1"
+      ARRIVAL_LEAD_MINUTES: "240"
       # No push provider either: pushes are dropped (and redacted in the log).
       ALLOW_CONSOLE_PUSH: "true"
       # Not a real secret: 32 bytes of ASCII, base64-encoded.
