@@ -2,12 +2,14 @@ import { isOpenSession, OPEN_SESSION_STATUSES, staleSessionCloseAt, whToKwh } fr
 
 import { updateBookingFrom } from "../data/bookings.ts";
 import { findSettlementSession, updateSessionFrom } from "../data/settlement.ts";
+import { refundChargerFault } from "./charger-fault.ts";
 import type { SettlementServices } from "./services.ts";
 
 // Sessions whose StopTransaction never came (the host's internet dropped, or
 // the charger lost power) are closed from their last meter value a few
 // minutes after the slot, so the booking completes and the receipt shows the
-// energy. The booking was paid upfront: nothing is billed here.
+// energy. The booking was paid upfront: nothing is billed here. A session the
+// charger dropped without delivering anything is refunded in full.
 
 /** What closing a stale session did. */
 export type CloseOutcome = "closed" | "needs_review" | "skipped";
@@ -37,6 +39,9 @@ export async function closeStaleSession(
   await updateBookingFrom(services.db, booking.id, ["active"], { status: "completed" });
   const usable =
     last !== null && session.meterStartWh !== null && last.energyWh >= session.meterStartWh;
+  // The charger stopped reporting: if it delivered nothing, that is its fault.
+  // Refund before closing the session, so a run that stops half way is retried.
+  if (usable && last.energyWh === session.meterStartWh) await refundChargerFault(services, found);
   const closed = await updateSessionFrom(
     services.db,
     sessionId,

@@ -2,6 +2,7 @@ import { checkMeter, type SessionStatus, whToKwh } from "@nd/domain";
 
 import { findSettlementSession, updateSessionFrom } from "../data/settlement.ts";
 import { queueNotification } from "../notifications/queue.ts";
+import { chargerEndedSession, refundChargerFault } from "./charger-fault.ts";
 import type { SettlementServices } from "./services.ts";
 
 // Reconciliation: after a session stops, check its meter and record the
@@ -16,8 +17,9 @@ export type ReconcileOutcome =
 /**
  * Reconciles a stopped session: the meter delta must agree with the last
  * MeterValue within 0.2 kWh; then its kWh is recorded and the session is
- * `reconciled`, and the host hears it ended. A disagreement sends it to
- * `needs_review`.
+ * `reconciled`, and the host hears it ended. A session that delivered
+ * nothing because the charger ended it or faulted is refunded in full first.
+ * A disagreement sends it to `needs_review`.
  */
 export async function reconcileSession(
   services: SettlementServices,
@@ -44,6 +46,10 @@ export async function reconcileSession(
   if (!meter.ok) {
     await flag(services, sessionId, booking.id, ["stopped"], meter.reason);
     return "needs_review";
+  }
+  // Refund before closing the session, so a run that stops half way is retried.
+  if (meter.deliveredWh === 0 && (await chargerEndedSession(services, found))) {
+    await refundChargerFault(services, found);
   }
   const changed = await updateSessionFrom(services.db, sessionId, ["stopped"], {
     status: "reconciled",

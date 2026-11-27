@@ -445,6 +445,72 @@ describe("reconciliation", () => {
   });
 });
 
+describe("a session that delivered nothing", () => {
+  /** A booking with a stopped session that delivered 0 kWh, stopped for `reason`. */
+  async function emptySession(reason: string): Promise<{ booked: Booked; sessionId: string }> {
+    clock.current = new Date();
+    const booked = await book();
+    const sessionId = await insertSession(booked, {
+      status: "stopped",
+      minutes: 30,
+      meterStartWh: 4_000,
+      meterStopWh: 4_000,
+      samples: [{ minute: 10, energyWh: 4_000 }],
+    });
+    await h.database.db
+      .update(sessions)
+      .set({ stopReason: reason })
+      .where(eq(sessions.id, sessionId));
+    return { booked, sessionId };
+  }
+
+  it("is refunded in full when the charger ended it or faulted, and not otherwise", async () => {
+    const powerLoss = await emptySession("PowerLoss");
+    const faulted = await emptySession("Remote");
+    await h.database.db.insert(ocppMessages).values({
+      chargerId: faulted.booked.chargerId,
+      direction: "in",
+      messageType: "call",
+      messageId: randomBytes(8).toString("hex"),
+      action: "StatusNotification",
+      payload: { connectorId: 1, errorCode: "GroundFailure", status: "Faulted" },
+      ts: new Date(faulted.booked.slot.start.getTime() + 5 * MINUTE),
+    });
+    const unplugged = await emptySession("EVDisconnected");
+    for (const { sessionId } of [powerLoss, faulted, unplugged]) {
+      await h.jobs.runNow(reconcileSessionJob, { sessionId });
+      expect((await sessionRow(sessionId)).status).toBe("reconciled");
+    }
+    for (const { booked } of [powerLoss, faulted]) {
+      expect(await refundsOf(booked.bookingId)).toMatchObject([
+        { amountCents: 1000, reason: "charger_fault", status: "succeeded" },
+      ]);
+    }
+    expect(await refundsOf(unplugged.booked.bookingId)).toEqual([]);
+    // Running it again refunds nothing more.
+    await h.jobs.runNow(reconcileSessionJob, { sessionId: powerLoss.sessionId });
+    expect(await moneyMoved(powerLoss.booked.bookingId)).toEqual({ captures: 0, refunds: 1 });
+  });
+
+  it("is refunded in full when the charger dropped it without delivering anything", async () => {
+    clock.current = new Date();
+    const booked = await book();
+    const sessionId = await insertSession(booked, {
+      status: "charging",
+      minutes: 0,
+      meterStartWh: 5_000,
+      samples: [{ minute: 30, energyWh: 5_000 }],
+    });
+    clock.current = new Date(booked.slot.end.getTime() + 11 * MINUTE);
+    await h.jobs.runNow(settlementSweepJob, {});
+    await h.jobs.drain();
+    expect(await sessionRow(sessionId)).toMatchObject({ status: "reconciled", kwh: 0 });
+    expect(await refundsOf(booked.bookingId)).toMatchObject([
+      { amountCents: 1000, reason: "charger_fault" },
+    ]);
+  });
+});
+
 describe("a session without a StopTransaction", () => {
   /** An open session whose slot has ended, with meter values up to 3 h 30 min. */
   async function abandoned(lastEnergyWh = 26_000): Promise<{ booked: Booked; sessionId: string }> {

@@ -192,6 +192,23 @@ export async function startFailedAtCharger(
   return result.rows[0]?.found === true;
 }
 
+/** Whether the charger reported a Faulted connector between `from` and `to`. */
+export async function chargerFaultedBetween(
+  db: Executor,
+  chargerId: string,
+  window: { from: Date; to: Date },
+): Promise<boolean> {
+  const result = await db.execute<{ found: boolean }>(sql`
+    select exists (
+      select 1 from ${ocppMessages} m
+      where m.charger_id = ${chargerId} and m.direction = 'in'
+        and m.action = 'StatusNotification' and m.payload ->> 'status' = 'Faulted'
+        and m.ts >= ${window.from.toISOString()}::timestamptz
+        and m.ts <= ${window.to.toISOString()}::timestamptz
+    ) as found`);
+  return result.rows[0]?.found === true;
+}
+
 /** The session a booking charged in: its latest one that did not fail to start. */
 export async function billedSessionOf(db: Executor, bookingId: string) {
   const [row] = await db
