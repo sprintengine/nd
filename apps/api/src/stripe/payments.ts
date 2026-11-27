@@ -2,11 +2,14 @@ import Stripe from "stripe";
 
 import { HttpProblem } from "../http/problem.ts";
 
-// Driver payments on the platform account (separate charges and transfers):
-// a Customer per driver, cards saved with SetupIntents, manual-capture
-// PaymentIntents authorised off-session, partial captures and transfers to
-// the host's connected account. Card numbers never reach the API; only
-// brand, last four digits and expiry are read back.
+// Driver payments as Stripe Connect destination charges: a Customer per
+// driver, cards saved with SetupIntents, and one off-session PaymentIntent
+// per booking whose funds go to the host's connected account, less an
+// application fee (the platform fee plus the card fee passed on to the
+// host). Instant bookings are charged at once; requests are held (manual
+// capture) until the host answers. Refunds reverse the host's share and the
+// application fee. Card numbers never reach the API; only brand, last four
+// digits and expiry are read back.
 
 /** A card saved on a driver's Customer. */
 export interface SavedCard {
@@ -17,17 +20,37 @@ export interface SavedCard {
   readonly expYear: number;
 }
 
-/** The outcome of authorising a booking's quote. */
-export type AuthorisationResult =
+/** The outcome of charging (or holding) a booking's price. */
+export type ChargeResult =
   | {
+      /** Charged (automatic capture). */
+      readonly status: "paid";
+      readonly paymentIntentId: string;
+      readonly chargeId: string | null;
+    }
+  | {
+      /** Held on the card until captured (manual capture). */
       readonly status: "authorised";
       readonly paymentIntentId: string;
-      readonly amountCents: number;
+    }
+  | {
+      /** Stripe has not decided yet (`processing`); a webhook settles it. */
+      readonly status: "pending";
+      readonly paymentIntentId: string;
     }
   | {
       readonly status: "failed";
       readonly paymentIntentId: string | null;
       /** A decline code or the PaymentIntent's status; never card details. */
+      readonly reason: string;
+    };
+
+/** The outcome of capturing a held booking. */
+export type CaptureResult =
+  | { readonly status: "paid"; readonly chargeId: string | null }
+  | {
+      /** The hold can no longer be captured (it expired or was released). */
+      readonly status: "failed";
       readonly reason: string;
     };
 
@@ -48,36 +71,41 @@ export interface StripePayments {
   /** The card, if it is saved on this customer. */
   findCard(customerId: string, paymentMethodId: string): Promise<SavedCard | undefined>;
   setDefaultCard(customerId: string, paymentMethodId: string): Promise<void>;
-  /** Authorises `amountCents` on a saved card off-session, for capture later. */
-  authorise(input: {
+  /**
+   * Charges a booking's price on a saved card off-session, as a destination
+   * charge to the host's connected account with `applicationFeeCents` kept
+   * back. `manual` holds it for capture when the host approves.
+   */
+  charge(input: {
     readonly bookingId: string;
     readonly amountCents: number;
     readonly currency: string;
     readonly customerId: string;
     readonly paymentMethodId: string;
+    readonly destination: string;
+    readonly applicationFeeCents: number;
+    readonly captureMethod: "automatic" | "manual";
     readonly idempotencyKey: string;
-  }): Promise<AuthorisationResult>;
-  /** Releases an authorisation. Succeeds if it was already released. */
+  }): Promise<ChargeResult>;
+  /** Releases a hold. Succeeds if it was already released. */
   cancelAuthorisation(input: {
     readonly paymentIntentId: string;
     readonly idempotencyKey: string;
   }): Promise<void>;
-  /** Captures part or all of an authorisation; the rest is released. */
+  /** Captures the whole of a hold. */
   capture(input: {
     readonly paymentIntentId: string;
-    readonly amountCents: number;
     readonly idempotencyKey: string;
-  }): Promise<{ chargeId: string | null; amountCents: number }>;
-  /** A transfer to a connected account, funded by a captured charge. */
-  transfer(input: {
+  }): Promise<CaptureResult>;
+  /** Refunds part or all of a charge, reversing the host's share and the application fee in proportion. */
+  refund(input: {
+    readonly paymentIntentId: string;
     readonly amountCents: number;
-    readonly currency: string;
-    readonly destination: string;
-    readonly sourceTransaction: string;
-    readonly transferGroup: string;
     readonly metadata: Record<string, string>;
     readonly idempotencyKey: string;
-  }): Promise<{ id: string }>;
+  }): Promise<{ id: string; status: "pending" | "succeeded" | "failed" }>;
+  /** Deletes a driver's Customer and the cards saved on it. Succeeds if it is already gone. */
+  deleteCustomer(customerId: string): Promise<void>;
 }
 
 type PaymentIntentLike = Pick<
@@ -96,6 +124,7 @@ export interface PaymentsSdk {
     ): Promise<{ id: string }>;
     retrieve(id: string): Promise<Stripe.Customer | Stripe.DeletedCustomer>;
     update(id: string, params: Stripe.CustomerUpdateParams): Promise<unknown>;
+    del(id: string): Promise<unknown>;
   };
   readonly setupIntents: {
     create(
@@ -124,11 +153,11 @@ export interface PaymentsSdk {
       options?: Stripe.RequestOptions,
     ): Promise<PaymentIntentLike>;
   };
-  readonly transfers: {
+  readonly refunds: {
     create(
-      params: Stripe.TransferCreateParams,
+      params: Stripe.RefundCreateParams,
       options?: Stripe.RequestOptions,
-    ): Promise<{ id: string }>;
+    ): Promise<{ id: string; status: string | null }>;
   };
 }
 
@@ -200,12 +229,15 @@ export function stripePaymentsFrom(sdk: PaymentsSdk): StripePayments {
       });
     },
 
-    async authorise({
+    async charge({
       bookingId,
       amountCents,
       currency,
       customerId,
       paymentMethodId,
+      destination,
+      applicationFeeCents,
+      captureMethod,
       idempotencyKey,
     }) {
       try {
@@ -217,22 +249,29 @@ export function stripePaymentsFrom(sdk: PaymentsSdk): StripePayments {
             payment_method: paymentMethodId,
             // Off-session cards only: nothing that would need a redirect.
             automatic_payment_methods: { enabled: true, allow_redirects: "never" },
-            capture_method: "manual",
+            capture_method: captureMethod,
             confirm: true,
             off_session: true,
-            // Separate charges and transfers: the host's transfer joins this group.
+            // Destination charge: the host's account receives the price less the application fee.
+            transfer_data: { destination },
+            application_fee_amount: applicationFeeCents,
             transfer_group: bookingId,
             metadata: { bookingId },
           },
           { idempotencyKey },
         );
-        if (intent.status === "requires_capture") {
+        if (intent.status === "succeeded") {
           return {
-            status: "authorised",
+            status: "paid",
             paymentIntentId: intent.id,
-            amountCents: intent.amount_capturable,
+            chargeId: idOf(intent.latest_charge),
           };
         }
+        if (intent.status === "requires_capture") {
+          return { status: "authorised", paymentIntentId: intent.id };
+        }
+        if (intent.status === "processing")
+          return { status: "pending", paymentIntentId: intent.id };
         return { status: "failed", paymentIntentId: intent.id, reason: intent.status };
       } catch (error) {
         if (error instanceof Stripe.errors.StripeCardError) {
@@ -267,36 +306,55 @@ export function stripePaymentsFrom(sdk: PaymentsSdk): StripePayments {
       }
     },
 
-    async capture({ paymentIntentId, amountCents, idempotencyKey }) {
-      const intent = await sdk.paymentIntents.capture(
-        paymentIntentId,
-        { amount_to_capture: amountCents },
-        { idempotencyKey },
-      );
-      return { chargeId: idOf(intent.latest_charge), amountCents: intent.amount_received };
+    async capture({ paymentIntentId, idempotencyKey }) {
+      try {
+        const intent = await sdk.paymentIntents.capture(paymentIntentId, {}, { idempotencyKey });
+        return { status: "paid", chargeId: idOf(intent.latest_charge) };
+      } catch (error) {
+        // The hold expired or was released: nothing can be captured any more.
+        if (
+          error instanceof Stripe.errors.StripeInvalidRequestError &&
+          error.code === "payment_intent_unexpected_state"
+        ) {
+          return { status: "failed", reason: "authorisation_expired" };
+        }
+        throw error;
+      }
     },
 
-    async transfer({
-      amountCents,
-      currency,
-      destination,
-      sourceTransaction,
-      transferGroup,
-      metadata,
-      idempotencyKey,
-    }) {
-      const transfer = await sdk.transfers.create(
+    async refund({ paymentIntentId, amountCents, metadata, idempotencyKey }) {
+      const refund = await sdk.refunds.create(
         {
+          payment_intent: paymentIntentId,
           amount: amountCents,
-          currency: currency.toLowerCase(),
-          destination,
-          source_transaction: sourceTransaction,
-          transfer_group: transferGroup,
+          // Take the host's share back from their account, and give up the application fee.
+          reverse_transfer: true,
+          refund_application_fee: true,
           metadata,
         },
         { idempotencyKey },
       );
-      return { id: transfer.id };
+      const status =
+        refund.status === "succeeded"
+          ? "succeeded"
+          : refund.status === "failed" || refund.status === "canceled"
+            ? "failed"
+            : "pending";
+      return { id: refund.id, status };
+    },
+
+    async deleteCustomer(customerId) {
+      try {
+        await sdk.customers.del(customerId);
+      } catch (error) {
+        if (
+          error instanceof Stripe.errors.StripeInvalidRequestError &&
+          error.code === "resource_missing"
+        ) {
+          return;
+        }
+        throw error;
+      }
     },
   };
 }
@@ -313,8 +371,9 @@ export const unconfiguredStripePayments: StripePayments = {
   listCards: unavailable,
   findCard: unavailable,
   setDefaultCard: unavailable,
-  authorise: unavailable,
+  charge: unavailable,
   cancelAuthorisation: unavailable,
   capture: unavailable,
-  transfer: unavailable,
+  refund: unavailable,
+  deleteCustomer: unavailable,
 };

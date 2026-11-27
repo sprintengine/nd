@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   coveringRule,
   driverSeesAddress,
-  hourlyPriceOf,
   ID_TAG_LENGTH,
   isSlotTaken,
   localDay,
@@ -116,15 +115,6 @@ describe("windowProblem", () => {
     [window("2027-01-12T22:00Z", "2027-01-13T22:01Z"), /at most 24/],
   ])("explains what is wrong with %j", (slot, message) => {
     expect(windowProblem(slot, now)).toMatch(message);
-  });
-});
-
-describe("hourlyPriceOf", () => {
-  const slot = window("2027-01-12T22:00Z", "2027-01-13T02:00Z");
-
-  it("uses the stored price, or derives it from the quote", () => {
-    expect(hourlyPriceOf({ pricePerHourCents: 300, quotedAmountCents: 1000, slot })).toBe(300);
-    expect(hourlyPriceOf({ pricePerHourCents: null, quotedAmountCents: 1000, slot })).toBe(250);
   });
 });
 

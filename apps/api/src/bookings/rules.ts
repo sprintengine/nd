@@ -1,4 +1,4 @@
-import { type BookingStatus, divideRoundHalfEven, holdsSlot, slotMinutes } from "@nd/domain";
+import { type BookingStatus, holdsSlot } from "@nd/domain";
 import { z } from "zod";
 
 import {
@@ -18,6 +18,9 @@ export const MIN_BOOKING_MINUTES = 30;
 
 /** Longest booking a driver may make. */
 export const MAX_BOOKING_HOURS = 24;
+
+/** Most requests one driver may have waiting for hosts' answers at once. */
+export const MAX_OPEN_REQUESTS = 3;
 
 /** Stripe's smallest charge in euro or sterling, in cents. */
 export const MIN_CHARGE_CENTS = 50;
@@ -106,16 +109,6 @@ export function windowProblem(
     return `A booking may be at most ${String(MAX_BOOKING_HOURS)} hours long.`;
   }
   return undefined;
-}
-
-/** The hourly price a booking was quoted at; derived from the quote for rows that lack it. */
-export function hourlyPriceOf(booking: {
-  readonly pricePerHourCents: number | null;
-  readonly quotedAmountCents: number;
-  readonly slot: { readonly start: Date; readonly end: Date };
-}): number {
-  if (booking.pricePerHourCents !== null) return booking.pricePerHourCents;
-  return divideRoundHalfEven(booking.quotedAmountCents * 60, slotMinutes(booking.slot));
 }
 
 /** Whether a driver may see the address and exact position: only while their booking holds the slot. */

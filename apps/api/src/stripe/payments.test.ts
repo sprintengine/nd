@@ -26,6 +26,7 @@ function fakeSdk() {
         Promise.resolve({ invoice_settings: { default_payment_method: { id: "pm_1" } } }),
       ),
       update: vi.fn(() => Promise.resolve({})),
+      del: vi.fn(() => Promise.resolve({ id: "cus_1", deleted: true })),
     },
     setupIntents: {
       create: vi.fn(() => Promise.resolve({ id: "seti_1", client_secret: "seti_1_secret" })),
@@ -51,19 +52,26 @@ function fakeSdk() {
         ),
       ),
     },
-    transfers: { create: vi.fn(() => Promise.resolve({ id: "tr_1" })) },
+    refunds: {
+      create: vi.fn((): Promise<{ id: string; status: string | null }> =>
+        Promise.resolve({ id: "re_1", status: "succeeded" }),
+      ),
+    },
   };
   return { sdk, payments: stripePaymentsFrom(sdk as unknown as PaymentsSdk) };
 }
 
-const authorisation = {
+const charge = {
   bookingId: "b1",
   amountCents: 1000,
   currency: "EUR",
   customerId: "cus_1",
   paymentMethodId: "pm_1",
-  idempotencyKey: "booking-b1-authorise",
-};
+  destination: "acct_host",
+  applicationFeeCents: 40,
+  captureMethod: "automatic",
+  idempotencyKey: "booking-b1-charge",
+} as const;
 
 describe("stripePaymentsFrom", () => {
   it("creates a customer per user, idempotently", async () => {
@@ -126,12 +134,15 @@ describe("stripePaymentsFrom", () => {
     });
   });
 
-  it("authorises off-session with manual capture, on the platform account", async () => {
+  it("charges off-session as a destination charge with the application fee", async () => {
     const { sdk, payments } = fakeSdk();
-    await expect(payments.authorise(authorisation)).resolves.toEqual({
-      status: "authorised",
+    sdk.paymentIntents.create.mockResolvedValueOnce(
+      intent({ status: "succeeded", latest_charge: "ch_1" }),
+    );
+    await expect(payments.charge(charge)).resolves.toEqual({
+      status: "paid",
       paymentIntentId: "pi_1",
-      amountCents: 1000,
+      chargeId: "ch_1",
     });
     const [params, options] = sdk.paymentIntents.create.mock.calls[0] as unknown as [
       Record<string, unknown>,
@@ -140,20 +151,38 @@ describe("stripePaymentsFrom", () => {
     expect(params).toMatchObject({
       amount: 1000,
       currency: "eur",
-      capture_method: "manual",
+      capture_method: "automatic",
       confirm: true,
       off_session: true,
+      transfer_data: { destination: "acct_host" },
+      application_fee_amount: 40,
       transfer_group: "b1",
       metadata: { bookingId: "b1" },
     });
-    expect(params).not.toHaveProperty("transfer_data");
-    expect(options).toEqual({ idempotencyKey: "booking-b1-authorise" });
+    expect(options).toEqual({ idempotencyKey: "booking-b1-charge" });
   });
 
-  it("reports an intent that was not authorised, and card declines, as failures", async () => {
+  it("holds a request's price with manual capture", async () => {
+    const { sdk, payments } = fakeSdk();
+    await expect(payments.charge({ ...charge, captureMethod: "manual" })).resolves.toEqual({
+      status: "authorised",
+      paymentIntentId: "pi_1",
+    });
+    expect(sdk.paymentIntents.create).toHaveBeenCalledWith(
+      expect.objectContaining({ capture_method: "manual" }),
+      { idempotencyKey: "booking-b1-charge" },
+    );
+    sdk.paymentIntents.create.mockResolvedValueOnce(intent({ status: "processing" }));
+    await expect(payments.charge(charge)).resolves.toEqual({
+      status: "pending",
+      paymentIntentId: "pi_1",
+    });
+  });
+
+  it("reports an intent that did not go through, and card declines, as failures", async () => {
     const { sdk, payments } = fakeSdk();
     sdk.paymentIntents.create.mockResolvedValueOnce(intent({ status: "requires_action" }));
-    await expect(payments.authorise(authorisation)).resolves.toEqual({
+    await expect(payments.charge(charge)).resolves.toEqual({
       status: "failed",
       paymentIntentId: "pi_1",
       reason: "requires_action",
@@ -166,7 +195,7 @@ describe("stripePaymentsFrom", () => {
         payment_intent: { id: "pi_2" } as Stripe.PaymentIntent,
       }),
     );
-    await expect(payments.authorise(authorisation)).resolves.toEqual({
+    await expect(payments.charge(charge)).resolves.toEqual({
       status: "failed",
       paymentIntentId: "pi_2",
       reason: "insufficient_funds",
@@ -174,18 +203,16 @@ describe("stripePaymentsFrom", () => {
     sdk.paymentIntents.create.mockRejectedValueOnce(
       new Stripe.errors.StripeCardError({ message: "declined", code: "expired_card" }),
     );
-    await expect(payments.authorise(authorisation)).resolves.toMatchObject({
+    await expect(payments.charge(charge)).resolves.toMatchObject({
       paymentIntentId: null,
       reason: "expired_card",
     });
     sdk.paymentIntents.create.mockRejectedValueOnce(
       new Stripe.errors.StripeCardError({ message: "declined" }),
     );
-    await expect(payments.authorise(authorisation)).resolves.toMatchObject({
-      reason: "card_declined",
-    });
+    await expect(payments.charge(charge)).resolves.toMatchObject({ reason: "card_declined" });
     sdk.paymentIntents.create.mockRejectedValueOnce(new Error("network"));
-    await expect(payments.authorise(authorisation)).rejects.toThrow("network");
+    await expect(payments.charge(charge)).rejects.toThrow("network");
   });
 
   it("releases an authorisation, accepting one already released", async () => {
@@ -208,56 +235,78 @@ describe("stripePaymentsFrom", () => {
     ).rejects.toThrow("already canceled");
   });
 
-  it("captures part of an authorisation", async () => {
+  it("captures the whole hold, and reports one that lapsed", async () => {
     const { sdk, payments } = fakeSdk();
     await expect(
-      payments.capture({ paymentIntentId: "pi_1", amountCents: 250, idempotencyKey: "k" }),
-    ).resolves.toEqual({ chargeId: "ch_1", amountCents: 250 });
-    expect(sdk.paymentIntents.capture).toHaveBeenCalledWith(
-      "pi_1",
-      { amount_to_capture: 250 },
-      { idempotencyKey: "k" },
+      payments.capture({ paymentIntentId: "pi_1", idempotencyKey: "k" }),
+    ).resolves.toEqual({ status: "paid", chargeId: "ch_1" });
+    expect(sdk.paymentIntents.capture).toHaveBeenCalledWith("pi_1", {}, { idempotencyKey: "k" });
+    sdk.paymentIntents.capture.mockRejectedValueOnce(
+      new Stripe.errors.StripeInvalidRequestError({
+        message: "canceled",
+        code: "payment_intent_unexpected_state",
+      }),
     );
-    sdk.paymentIntents.capture.mockResolvedValueOnce(
-      intent({ amount_received: 250, latest_charge: { id: "ch_2" } }),
-    );
-    expect(
-      (await payments.capture({ paymentIntentId: "pi_1", amountCents: 250, idempotencyKey: "k" }))
-        .chargeId,
-    ).toBe("ch_2");
+    await expect(
+      payments.capture({ paymentIntentId: "pi_1", idempotencyKey: "k" }),
+    ).resolves.toEqual({ status: "failed", reason: "authorisation_expired" });
+    sdk.paymentIntents.capture.mockRejectedValueOnce(new Error("network"));
+    await expect(
+      payments.capture({ paymentIntentId: "pi_1", idempotencyKey: "k" }),
+    ).rejects.toThrow("network");
   });
 
-  it("transfers to the connected account from the charge", async () => {
+  it("refunds with the host's share and the application fee reversed", async () => {
     const { sdk, payments } = fakeSdk();
-    await expect(
-      payments.transfer({
-        amountCents: 900,
-        currency: "EUR",
-        destination: "acct_1",
-        sourceTransaction: "ch_1",
-        transferGroup: "b1",
-        metadata: { bookingId: "b1" },
-        idempotencyKey: "k",
-      }),
-    ).resolves.toEqual({ id: "tr_1" });
-    expect(sdk.transfers.create).toHaveBeenCalledWith(
+    const input = {
+      paymentIntentId: "pi_1",
+      amountCents: 500,
+      metadata: { bookingId: "b1" },
+      idempotencyKey: "refund-r1",
+    };
+    await expect(payments.refund(input)).resolves.toEqual({ id: "re_1", status: "succeeded" });
+    expect(sdk.refunds.create).toHaveBeenCalledWith(
       {
-        amount: 900,
-        currency: "eur",
-        destination: "acct_1",
-        source_transaction: "ch_1",
-        transfer_group: "b1",
+        payment_intent: "pi_1",
+        amount: 500,
+        reverse_transfer: true,
+        refund_application_fee: true,
         metadata: { bookingId: "b1" },
       },
-      { idempotencyKey: "k" },
+      { idempotencyKey: "refund-r1" },
     );
+    for (const [status, expected] of [
+      ["pending", "pending"],
+      ["requires_action", "pending"],
+      [null, "pending"],
+      ["failed", "failed"],
+      ["canceled", "failed"],
+    ] as const) {
+      sdk.refunds.create.mockResolvedValueOnce({ id: "re_2", status });
+      expect((await payments.refund(input)).status).toBe(expected);
+    }
+  });
+
+  it("deletes a customer, accepting one already gone", async () => {
+    const { sdk, payments } = fakeSdk();
+    await payments.deleteCustomer("cus_1");
+    expect(sdk.customers.del).toHaveBeenCalledWith("cus_1");
+    sdk.customers.del.mockRejectedValueOnce(
+      new Stripe.errors.StripeInvalidRequestError({
+        message: "No such customer",
+        code: "resource_missing",
+      }),
+    );
+    await expect(payments.deleteCustomer("cus_gone")).resolves.toBeUndefined();
+    sdk.customers.del.mockRejectedValueOnce(new Error("network"));
+    await expect(payments.deleteCustomer("cus_1")).rejects.toThrow("network");
   });
 });
 
 describe("unconfiguredStripePayments", () => {
   it("answers 503 for every call", async () => {
     await expect(unconfiguredStripePayments.listCards("cus_1")).rejects.toBeInstanceOf(HttpProblem);
-    await expect(unconfiguredStripePayments.authorise(authorisation)).rejects.toMatchObject({
+    await expect(unconfiguredStripePayments.charge(charge)).rejects.toMatchObject({
       status: 503,
       code: "payments-unavailable",
     });

@@ -184,10 +184,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     clock: deps.clock,
     payments: deps.payments,
     jobs: deps.jobs,
-    platformFeeBps: config.platformFeeBps,
+    fees: config.fees,
+    taxRecordRetentionYears: config.taxRecordRetentionYears,
     timings: {
       minBookingMinutes: config.minBookingMinutes,
       staleSessionGraceMinutes: config.staleSessionGraceMinutes,
+      arrivalLeadMinutes: config.arrivalLeadMinutes,
     },
     log: app.log,
     email: deps.email,
@@ -239,7 +241,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       if (bookingId !== undefined) feed.bookingChanged(bookingId);
       done(null, payload);
     });
-    registerBookingRoutes(scope, services);
+    registerBookingRoutes(scope, services, config.bookingRateLimitPerHour);
     registerSessionRoutes(scope, sessionServices);
     registerRealtimeRoute(scope, {
       hub,
@@ -254,7 +256,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerReceiptRoutes(scope, services);
     registerBookingDisputeRoutes(scope, services);
     registerHostSessionRoutes(scope, sessionServices);
-    registerAdminRoutes(scope, sessionServices, config.adminUserIds);
+    registerAdminRoutes(scope, services, config.adminUserIds);
     if (deps.testHooks !== undefined) registerE2eRoutes(scope, deps.testHooks.messages);
     done();
   });

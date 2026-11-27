@@ -361,20 +361,42 @@ describe("configFromEnv", () => {
     expect(config.secureCookies).toBe(false);
   });
 
-  it("reads the webhook secret and the platform fee, which defaults to nothing", () => {
+  it("reads the webhook secret and the fees: no platform fee, the card fee passed on", () => {
     expect(configFromEnv(apiEnvSchema.parse(required))).toMatchObject({
       stripeWebhookSecret: undefined,
-      platformFeeBps: 0,
+      fees: { platformFeeBps: 0, cardFeeBps: 150, cardFeeFixedCents: 25 },
+      bookingRateLimitPerHour: 20,
+      taxRecordRetentionYears: 6,
+      arrivalLeadMinutes: 240,
     });
     const config = configFromEnv(
       apiEnvSchema.parse({
         ...required,
         STRIPE_WEBHOOK_SECRET: "whsec_example",
         PLATFORM_FEE_BPS: "250",
+        CARD_FEE_BPS: "140",
+        CARD_FEE_FIXED_CENTS: "20",
+        BOOKING_RATE_LIMIT_PER_HOUR: "5",
+        TAX_RECORD_RETENTION_YEARS: "7",
+        ARRIVAL_LEAD_MINUTES: "30",
       }),
     );
-    expect(config).toMatchObject({ stripeWebhookSecret: "whsec_example", platformFeeBps: 250 });
-    expect(apiEnvSchema.safeParse({ ...required, PLATFORM_FEE_BPS: "10001" }).success).toBe(false);
+    expect(config).toMatchObject({
+      stripeWebhookSecret: "whsec_example",
+      fees: { platformFeeBps: 250, cardFeeBps: 140, cardFeeFixedCents: 20 },
+      bookingRateLimitPerHour: 5,
+      taxRecordRetentionYears: 7,
+      arrivalLeadMinutes: 30,
+    });
+    for (const bad of [
+      { PLATFORM_FEE_BPS: "10001" },
+      { CARD_FEE_BPS: "-1" },
+      { CARD_FEE_FIXED_CENTS: "1001" },
+      { TAX_RECORD_RETENTION_YEARS: "0" },
+      { ARRIVAL_LEAD_MINUTES: "1441" },
+    ]) {
+      expect(apiEnvSchema.safeParse({ ...required, ...bad }).success).toBe(false);
+    }
   });
 
   it("reads the admin allowlist, which is empty by default", () => {

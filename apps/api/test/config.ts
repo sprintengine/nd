@@ -22,12 +22,15 @@ export function testConfig(overrides: Partial<ApiConfig> = {}): ApiConfig {
     ocppWssUrl: "wss://ocpp.example.com/v16/",
     onboardingWaitMaxSeconds: 5,
     stripeWebhookSecret: "whsec_test_secret",
-    platformFeeBps: 0,
+    fees: { platformFeeBps: 0, cardFeeBps: 150, cardFeeFixedCents: 25 },
+    bookingRateLimitPerHour: 1_000,
+    taxRecordRetentionYears: 6,
     taxKeys: parseTaxKeyring(TEST_TAX_KEYS),
     adminUserIds: [],
     sessionStartTimeoutSeconds: 120,
     staleSessionGraceMinutes: 10,
     minBookingMinutes: 30,
+    arrivalLeadMinutes: 240,
     ...overrides,
   };
 }

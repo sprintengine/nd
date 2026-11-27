@@ -9,12 +9,14 @@ import {
   PAYMENT_ID,
 } from "../../test/booking-detail.ts";
 import type { fakePayments, memoryJobs } from "../../test/fakes.ts";
-import { SESSION_COOKIE, signInAs, startUnitApp, USER_ID } from "../../test/unit-app.ts";
+import { NOW, SESSION_COOKIE, signInAs, startUnitApp, USER_ID } from "../../test/unit-app.ts";
 import * as data from "../data/bookings.ts";
 import * as listing from "../data/listing.ts";
+import * as paymentData from "../data/payments.ts";
 
 vi.mock("../data/bookings.ts");
 vi.mock("../data/listing.ts");
+vi.mock("../data/payments.ts");
 
 let app: FastifyInstance;
 let payments: ReturnType<typeof fakePayments>;
@@ -28,6 +30,8 @@ const charger = {
   hostId: "host-1",
   hostUserId: HOST_USER_ID,
   maxSessionsPerDay: 2,
+  stripeAccountId: "acct_host",
+  payoutStatus: "enabled",
 } satisfies data.BookableCharger;
 
 const rule = (
@@ -43,7 +47,7 @@ const rule = (
   ...overrides,
 });
 
-// NOW is Monday 2027-01-11 12:00 UTC; Tuesday night is inside the 6-day horizon.
+// NOW is Monday 2027-01-11 12:00 UTC; the slot is Tuesday night.
 const request = {
   chargerId: CHARGER_ID,
   from: "2027-01-12T22:00:00Z",
@@ -64,7 +68,7 @@ beforeEach(() => {
   signInAs(app);
   vi.mocked(data.findBookableCharger).mockResolvedValue(charger);
   vi.mocked(listing.chargerRules).mockResolvedValue([rule()]);
-  vi.mocked(data.hostBookingsStarting).mockResolvedValue(0);
+  vi.mocked(data.openRequestCount).mockResolvedValue(0);
   vi.mocked(data.slotTaken).mockResolvedValue(false);
   vi.mocked(data.findCustomer).mockResolvedValue({
     id: USER_ID,
@@ -79,6 +83,27 @@ beforeEach(() => {
   vi.mocked(data.updatePaymentFrom).mockResolvedValue(true);
   vi.mocked(data.updateBookingFrom).mockResolvedValue(true);
   vi.mocked(data.findBookingDetail).mockResolvedValue(bookingDetail(USER_ID));
+  vi.mocked(paymentData.updateBookingWithRefund).mockImplementation(
+    (_db, _id, _from, _change, refund) =>
+      Promise.resolve({
+        changed: true,
+        refund:
+          refund === undefined
+            ? undefined
+            : {
+                ...refund,
+                id: "refund-1",
+                currency: "EUR",
+                status: "pending",
+                stripeRefundId: null,
+                issuedById: null,
+                note: null,
+                failureReason: null,
+                createdAt: NOW,
+                updatedAt: NOW,
+              },
+      }),
+  );
 });
 
 afterEach(async () => {
@@ -95,32 +120,47 @@ describe("POST /bookings", () => {
     expect((await send("POST", "/bookings", request)).statusCode).toBe(403);
   });
 
-  it("books an instant slot: quotes it, authorises it now and schedules the no-show check", async () => {
+  it("books an instant slot: prices it, charges it upfront and schedules the no-show check", async () => {
     const response = await send("POST", "/bookings", request);
     expect(response.statusCode, response.body).toBe(201);
     expect(response.json()).toMatchObject({ id: BOOKING_ID, status: "confirmed", role: "driver" });
-    const inserted = vi.mocked(data.insertBookingWithPayment).mock.calls[0]?.[1];
+    const [, inserted, payment, cap] = vi.mocked(data.insertBookingWithPayment).mock.calls[0] ?? [];
     expect(inserted).toMatchObject({
       status: "confirmed",
       quotedAmountCents: 1000,
       pricePerHourCents: 250,
       vehiclePlate: "251 D 1234",
-      paymentMethodId: "pm_card_visa",
     });
     expect(inserted?.idTag).toMatch(/^[A-Z2-9]{20}$/);
-    expect(payments.callsTo("authorise")[0]?.input).toMatchObject({
+    expect(payment).toEqual({
+      paymentMethodId: "pm_card_visa",
+      amountCents: 1000,
+      platformFeeCents: 0,
+      cardFeeCents: 40,
+      captureMethod: "automatic",
+    });
+    expect(cap).toMatchObject({ hostId: "host-1", maxSessionsPerDay: 2 });
+    expect(payments.callsTo("charge")[0]?.input).toEqual({
       bookingId: BOOKING_ID,
       amountCents: 1000,
       currency: "EUR",
       customerId: "cus_1",
       paymentMethodId: "pm_card_visa",
-      idempotencyKey: `booking-${BOOKING_ID}-authorise`,
+      destination: "acct_host",
+      applicationFeeCents: 40,
+      captureMethod: "automatic",
+      idempotencyKey: `booking-${BOOKING_ID}-charge`,
     });
     expect(data.updatePaymentFrom).toHaveBeenCalledWith(
       expect.anything(),
       PAYMENT_ID,
-      ["pending_authorisation"],
-      { status: "authorised", stripePaymentIntentId: "pi_1", authorisedCents: 1000 },
+      ["pending"],
+      {
+        status: "paid",
+        stripePaymentIntentId: "pi_1",
+        stripeChargeId: "ch_pi_1",
+        failureReason: null,
+      },
     );
     expect(jobs.sent).toEqual([
       {
@@ -136,39 +176,37 @@ describe("POST /bookings", () => {
     ]);
   });
 
-  it("leaves a request without an idTag and schedules its expiry at the start", async () => {
+  it("holds a request's price on the card and lets the host answer within 24 hours", async () => {
     vi.mocked(listing.chargerRules).mockResolvedValue([rule({ instantBook: false })]);
+    vi.mocked(data.findBookingDetail).mockResolvedValue(
+      bookingDetail(USER_ID, {
+        booking: { status: "requested", idTag: null },
+        payment: { status: "pending", captureMethod: "manual", stripePaymentIntentId: null },
+      }),
+    );
     expect((await send("POST", "/bookings", request)).statusCode).toBe(201);
-    expect(vi.mocked(data.insertBookingWithPayment).mock.calls[0]?.[1]).toMatchObject({
-      status: "requested",
-      idTag: null,
+    const [, inserted, payment] = vi.mocked(data.insertBookingWithPayment).mock.calls[0] ?? [];
+    expect(inserted).toMatchObject({ status: "requested", idTag: null });
+    expect(payment?.captureMethod).toBe("manual");
+    expect(payments.callsTo("charge")[0]?.input).toMatchObject({ captureMethod: "manual" });
+    expect(vi.mocked(data.updatePaymentFrom).mock.calls[0]?.[3]).toMatchObject({
+      status: "authorised",
     });
+    // The booking was made 2027-01-10 12:00: the host has until the next day at noon.
     expect(jobs.sent[0]).toMatchObject({
       name: "booking-expire-request",
-      options: { startAfter: new Date("2027-01-12T22:00:00Z") },
+      options: { startAfter: new Date("2027-01-11T12:00:00Z") },
     });
   });
 
-  it("keeps the saved card for a far slot and schedules its authorisation", async () => {
+  it("charges a slot weeks away upfront too", async () => {
     const response = await send("POST", "/bookings", {
       ...request,
-      from: "2027-01-19T22:00:00Z",
-      to: "2027-01-20T02:00:00Z",
+      from: "2027-02-09T22:00:00Z",
+      to: "2027-02-10T02:00:00Z",
     });
     expect(response.statusCode).toBe(201);
-    expect(payments.callsTo("authorise")).toHaveLength(0);
-    const authoriseAt = new Date("2027-01-18T22:00:00Z");
-    expect(data.updatePaymentFrom).toHaveBeenCalledWith(
-      expect.anything(),
-      PAYMENT_ID,
-      ["pending_authorisation"],
-      { status: "card_saved", authoriseAt },
-    );
-    expect(jobs.sent[0]).toEqual({
-      name: "authorise-booking",
-      payload: { bookingId: BOOKING_ID },
-      options: { startAfter: authoriseAt, singletonKey: BOOKING_ID },
-    });
+    expect(payments.callsTo("charge")).toHaveLength(1);
   });
 
   it("uses the card asked for, if it is the driver's", async () => {
@@ -216,8 +254,36 @@ describe("POST /bookings", () => {
           .mocked(data.findBookableCharger)
           .mockResolvedValue({ ...charger, acceptingBookings: false }),
     ],
+    [
+      "charger-unavailable",
+      409,
+      () =>
+        vi
+          .mocked(data.findBookableCharger)
+          .mockResolvedValue({ ...charger, payoutStatus: "pending" }),
+    ],
+    [
+      "charger-unavailable",
+      409,
+      () =>
+        vi
+          .mocked(data.findBookableCharger)
+          .mockResolvedValue({ ...charger, stripeAccountId: null }),
+    ],
     ["outside-availability", 422, () => vi.mocked(listing.chargerRules).mockResolvedValue([])],
-    ["host-day-full", 409, () => vi.mocked(data.hostBookingsStarting).mockResolvedValue(2)],
+    [
+      "too-many-requests",
+      409,
+      () => {
+        vi.mocked(listing.chargerRules).mockResolvedValue([rule({ instantBook: false })]);
+        vi.mocked(data.openRequestCount).mockResolvedValue(3);
+      },
+    ],
+    [
+      "host-day-full",
+      409,
+      () => vi.mocked(data.insertBookingWithPayment).mockResolvedValue("host-day-full"),
+    ],
     ["slot-taken", 409, () => vi.mocked(data.slotTaken).mockResolvedValue(true)],
     [
       "amount-too-small",
@@ -227,14 +293,20 @@ describe("POST /bookings", () => {
     [
       "slot-taken",
       409,
-      () => vi.mocked(data.insertBookingWithPayment).mockResolvedValue(undefined),
+      () => vi.mocked(data.insertBookingWithPayment).mockResolvedValue("slot-taken"),
     ],
-  ] as const)("answers %s (%d) without authorising", async (code, status, arrange) => {
+  ] as const)("answers %s (%d) without charging", async (code, status, arrange) => {
     arrange();
     const response = await send("POST", "/bookings", request);
     expect(response.statusCode).toBe(status);
     expect(response.json()).toMatchObject({ code });
-    expect(payments.callsTo("authorise")).toHaveLength(0);
+    expect(payments.callsTo("charge")).toHaveLength(0);
+  });
+
+  it("lets a driver with requests waiting still book instantly", async () => {
+    vi.mocked(data.openRequestCount).mockResolvedValue(3);
+    expect((await send("POST", "/bookings", request)).statusCode).toBe(201);
+    expect(data.openRequestCount).not.toHaveBeenCalled();
   });
 
   it("refuses a slot that is not bookable as asked", async () => {
@@ -244,14 +316,18 @@ describe("POST /bookings", () => {
   });
 
   it("answers 402 and cancels the booking when the card is declined", async () => {
-    payments.state.authorisation = { status: "failed", reason: "insufficient_funds" };
+    payments.state.charge = { status: "failed", reason: "insufficient_funds" };
     const response = await send("POST", "/bookings", request);
     expect(response.statusCode).toBe(402);
     expect(data.updatePaymentFrom).toHaveBeenCalledWith(
       expect.anything(),
       PAYMENT_ID,
-      ["pending_authorisation", "card_saved"],
-      { status: "failed", failureReason: "insufficient_funds" },
+      ["pending"],
+      {
+        status: "failed",
+        stripePaymentIntentId: "pi_1",
+        failureReason: "insufficient_funds",
+      },
     );
     expect(data.updateBookingFrom).toHaveBeenCalledWith(
       expect.anything(),
@@ -259,23 +335,46 @@ describe("POST /bookings", () => {
       ["requested", "confirmed"],
       expect.objectContaining({ status: "cancelled", cancelledBy: "system" }),
     );
-    expect(jobs.sent).toHaveLength(0);
+    expect(jobs.sent.map((job) => job.name)).toEqual(["notify"]);
   });
 
-  it("answers 502 and cancels the booking when Stripe cannot be reached", async () => {
-    payments.state.authorisation = { status: "error" };
+  it("keeps the booking with its payment pending, and resumes it, when Stripe does not answer", async () => {
+    payments.state.charge = { status: "error" };
     const response = await send("POST", "/bookings", request);
-    expect(response.statusCode).toBe(502);
-    expect(response.json()).toMatchObject({ code: "payment-provider-error" });
-    expect(data.updateBookingFrom).toHaveBeenCalled();
+    expect(response.statusCode).toBe(201);
+    expect(data.updatePaymentFrom).toHaveBeenCalledWith(
+      expect.anything(),
+      PAYMENT_ID,
+      ["pending"],
+      {
+        failureReason: "outcome_unknown",
+      },
+    );
+    expect(data.updateBookingFrom).not.toHaveBeenCalled();
+    expect(jobs.sent[0]).toMatchObject({
+      name: "resume-payment",
+      payload: { paymentId: PAYMENT_ID },
+      options: { singletonKey: PAYMENT_ID, startAfter: new Date(NOW.getTime() + 60_000) },
+    });
+  });
+
+  it("resumes a charge Stripe is still processing", async () => {
+    payments.state.charge = { status: "processing" };
+    expect((await send("POST", "/bookings", request)).statusCode).toBe(201);
+    expect(jobs.sent[0]?.name).toBe("resume-payment");
   });
 
   it("passes on a problem from the payments layer, such as Stripe not being configured", async () => {
     const { HttpProblem } = await import("../http/problem.ts");
-    vi.spyOn(payments.payments, "authorise").mockRejectedValue(
+    vi.spyOn(payments.payments, "charge").mockRejectedValue(
       new HttpProblem(503, "payments-unavailable", "Payments are not configured"),
     );
     expect((await send("POST", "/bookings", request)).statusCode).toBe(503);
+  });
+
+  it("fails loudly when the saved booking cannot be read back", async () => {
+    vi.mocked(data.findBookingDetail).mockResolvedValue(undefined);
+    expect((await send("POST", "/bookings", request)).statusCode).toBe(500);
   });
 });
 
@@ -290,7 +389,7 @@ describe("reading bookings", () => {
       addressVisible: true,
       address: "7 Test Row, Dublin 6",
       driverFirstName: null,
-      payment: { status: "authorised", authorisedCents: 1000, authoriseAt: null },
+      payment: { status: "paid", amountCents: 1000 },
     });
   });
 
@@ -315,7 +414,12 @@ describe("reading bookings", () => {
       ...bookingDetail("user-cian", {
         booking: { status: "cancelled", cancelledAt: new Date("2027-01-11T10:00:00Z") },
       }),
-      host: { id: "host-1", userId: USER_ID, cancellationCutoffMinutes: 120 },
+      host: {
+        id: "host-1",
+        userId: USER_ID,
+        cancellationCutoffMinutes: 120,
+        stripeAccountId: "acct_host",
+      },
     });
     expect((await send("GET", `/bookings/${BOOKING_ID}`)).json()).toMatchObject({
       role: "host",
@@ -380,17 +484,60 @@ describe("host answers", () => {
       ...bookingDetail("user-cian", {
         ...overrides,
         booking: { status: "requested", idTag: null, ...overrides.booking },
+        payment: { status: "authorised", captureMethod: "manual", ...overrides.payment },
       }),
-      host: { id: "host-1", userId: USER_ID, cancellationCutoffMinutes: 120 },
+      host: {
+        id: "host-1",
+        userId: USER_ID,
+        cancellationCutoffMinutes: 120,
+        stripeAccountId: "acct_host",
+      },
     });
 
-  it("approves a request with a new idTag and schedules the no-show check", async () => {
+  it("approves a request with a new idTag, then charges the held price", async () => {
     asHost();
     expect((await send("POST", `/bookings/${BOOKING_ID}/approve`)).statusCode).toBe(200);
     const change = vi.mocked(data.updateBookingFrom).mock.calls[0]?.[3];
     expect(change?.status).toBe("confirmed");
     expect(change?.idTag).toMatch(/^[A-Z2-9]{20}$/);
+    expect(payments.callsTo("capture")[0]?.input).toEqual({
+      paymentIntentId: "pi_1",
+      idempotencyKey: `booking-${BOOKING_ID}-capture`,
+    });
+    expect(data.updatePaymentFrom).toHaveBeenCalledWith(
+      expect.anything(),
+      PAYMENT_ID,
+      ["authorised"],
+      { status: "paid", stripeChargeId: "ch_pi_1", failureReason: null },
+    );
     expect(jobs.sent[0]?.name).toBe("booking-no-show");
+  });
+
+  it("cancels the booking with 402 when the hold has lapsed", async () => {
+    asHost();
+    payments.state.capture = "lapsed";
+    const response = await send("POST", `/bookings/${BOOKING_ID}/approve`);
+    expect(response.statusCode).toBe(402);
+    expect(response.json()).toMatchObject({ code: "payment-failed" });
+    expect(vi.mocked(data.updateBookingFrom).mock.calls[1]?.[3]).toMatchObject({
+      status: "cancelled",
+      cancelledBy: "system",
+    });
+  });
+
+  it("confirms anyway and resumes a capture Stripe did not answer", async () => {
+    asHost();
+    payments.state.capture = "error";
+    expect((await send("POST", `/bookings/${BOOKING_ID}/approve`)).statusCode).toBe(200);
+    expect(jobs.sent[0]).toMatchObject({ name: "resume-payment" });
+  });
+
+  it("waits for a request's hold to be in place", async () => {
+    asHost({ payment: { status: "pending" } });
+    expect((await send("POST", `/bookings/${BOOKING_ID}/approve`)).json()).toMatchObject({
+      code: "payment-in-progress",
+    });
+    expect(data.updateBookingFrom).not.toHaveBeenCalled();
   });
 
   it("answers 409 when the slot was taken, or the request already answered", async () => {
@@ -407,6 +554,7 @@ describe("host answers", () => {
     expect((await send("POST", `/bookings/${BOOKING_ID}/approve`)).json()).toMatchObject({
       code: "not-requested",
     });
+    expect(payments.callsTo("capture")).toHaveLength(0);
     asHost({ booking: { status: "confirmed" } });
     expect((await send("POST", `/bookings/${BOOKING_ID}/approve`)).statusCode).toBe(409);
     expect((await send("POST", `/bookings/${BOOKING_ID}/decline`)).statusCode).toBe(409);
@@ -418,21 +566,33 @@ describe("host answers", () => {
     expect((await send("POST", `/bookings/${BOOKING_ID}/decline`)).statusCode).toBe(404);
   });
 
-  it("declines a request and releases the authorisation", async () => {
+  it("declines a request, then releases the hold", async () => {
     asHost();
     const response = await send("POST", `/bookings/${BOOKING_ID}/decline`, { reason: "Away" });
     expect(response.statusCode).toBe(200);
-    expect(payments.callsTo("cancelAuthorisation")[0]?.input).toEqual({
-      paymentIntentId: "pi_1",
-      idempotencyKey: `booking-${BOOKING_ID}-release`,
-    });
     expect(vi.mocked(data.updateBookingFrom).mock.calls[0]?.[3]).toMatchObject({
       status: "cancelled",
       cancelledBy: "host",
       cancellationReason: "Away",
     });
+    expect(payments.callsTo("cancelAuthorisation")[0]?.input).toEqual({
+      paymentIntentId: "pi_1",
+      idempotencyKey: `booking-${BOOKING_ID}-release`,
+    });
     vi.mocked(data.updateBookingFrom).mockResolvedValueOnce(false);
     expect((await send("POST", `/bookings/${BOOKING_ID}/decline`)).statusCode).toBe(409);
+    expect(payments.callsTo("cancelAuthorisation")).toHaveLength(1);
+  });
+
+  it("resumes a release Stripe did not answer, and one whose hold is not known yet", async () => {
+    asHost();
+    payments.state.release = "error";
+    expect((await send("POST", `/bookings/${BOOKING_ID}/decline`)).statusCode).toBe(200);
+    expect(jobs.sent[0]).toMatchObject({ name: "resume-payment" });
+    asHost({ payment: { status: "pending", stripePaymentIntentId: null } });
+    jobs.clear();
+    expect((await send("POST", `/bookings/${BOOKING_ID}/decline`)).statusCode).toBe(200);
+    expect(jobs.sent[0]).toMatchObject({ name: "resume-payment" });
   });
 });
 
@@ -441,60 +601,86 @@ describe("POST /bookings/:id/cancel", () => {
   const soon = new Date("2027-01-11T13:00:00Z");
   const soonEnd = new Date("2027-01-11T17:00:00Z");
 
-  it("is free before the cutoff: the authorisation is released", async () => {
+  it("refunds a driver in full before the cutoff", async () => {
     const response = await send("POST", `/bookings/${BOOKING_ID}/cancel`);
     expect(response.statusCode).toBe(200);
-    expect(payments.callsTo("capture")).toHaveLength(0);
-    expect(payments.callsTo("cancelAuthorisation")).toHaveLength(1);
-    expect(vi.mocked(data.updateBookingFrom).mock.calls[0]?.[3]).toMatchObject({
-      status: "cancelled",
-      cancelledBy: "driver",
-      cancellationReason: "cancelled_by_driver",
-      cancellationFeeCents: 0,
+    expect(paymentData.updateBookingWithRefund).toHaveBeenCalledWith(
+      expect.anything(),
+      BOOKING_ID,
+      ["confirmed"],
+      expect.objectContaining({
+        status: "cancelled",
+        cancelledBy: "driver",
+        cancellationReason: "cancelled_by_driver",
+      }),
+      { paymentId: PAYMENT_ID, amountCents: 1000, reason: "driver_cancelled" },
+    );
+    expect(payments.callsTo("refund")[0]?.input).toEqual({
+      paymentIntentId: "pi_1",
+      amountCents: 1000,
+      metadata: { bookingId: BOOKING_ID, refundId: "refund-1", reason: "driver_cancelled" },
+      idempotencyKey: "refund-refund-1",
+    });
+    expect(paymentData.updatePendingRefund).toHaveBeenCalledWith(expect.anything(), "refund-1", {
+      status: "succeeded",
+      stripeRefundId: "re_refund-refund-1",
     });
   });
 
-  it("captures one hour after the host's cutoff and queues the host's transfer", async () => {
+  it("refunds nothing when the driver cancels after the host's cutoff", async () => {
     vi.mocked(data.findBookingDetail).mockResolvedValue(
       bookingDetail(USER_ID, { booking: { slot: { start: soon, end: soonEnd } } }),
     );
     const response = await send("POST", `/bookings/${BOOKING_ID}/cancel`, { reason: "Plans" });
     expect(response.statusCode).toBe(200);
-    expect(payments.callsTo("capture")[0]?.input).toEqual({
-      paymentIntentId: "pi_1",
-      amountCents: 250,
-      idempotencyKey: `booking-${BOOKING_ID}-capture`,
+    expect(vi.mocked(paymentData.updateBookingWithRefund).mock.calls[0]?.[4]).toBeUndefined();
+    expect(payments.calls).toHaveLength(0);
+  });
+
+  it("refunds in full when the host cancels, even late", async () => {
+    vi.mocked(data.findBookingDetail).mockResolvedValue({
+      ...bookingDetail("user-cian", { booking: { slot: { start: soon, end: soonEnd } } }),
+      host: {
+        id: "host-1",
+        userId: USER_ID,
+        cancellationCutoffMinutes: 120,
+        stripeAccountId: "acct_host",
+      },
     });
-    expect(vi.mocked(data.updateBookingFrom).mock.calls[0]?.[3]).toMatchObject({
-      cancellationFeeCents: 250,
-      cancellationReason: "Plans",
-    });
-    expect(jobs.sent[0]).toEqual({
-      name: "host-transfer",
-      payload: { paymentId: PAYMENT_ID },
-      options: { singletonKey: PAYMENT_ID },
+    await send("POST", `/bookings/${BOOKING_ID}/cancel`);
+    expect(vi.mocked(paymentData.updateBookingWithRefund).mock.calls[0]?.[4]).toEqual({
+      paymentId: PAYMENT_ID,
+      amountCents: 1000,
+      reason: "host_cancelled",
     });
   });
 
-  it("charges no fee without an authorisation, or when the host cancels", async () => {
+  it("resumes a refund Stripe did not answer", async () => {
+    payments.state.refund = "error";
+    expect((await send("POST", `/bookings/${BOOKING_ID}/cancel`)).statusCode).toBe(200);
+    expect(jobs.sent[0]).toMatchObject({ name: "resume-payment" });
+  });
+
+  it("releases a request's hold", async () => {
     vi.mocked(data.findBookingDetail).mockResolvedValue(
       bookingDetail(USER_ID, {
-        booking: { slot: { start: soon, end: soonEnd } },
-        payment: { status: "card_saved", stripePaymentIntentId: null },
+        booking: { status: "requested", idTag: null },
+        payment: { status: "authorised", captureMethod: "manual" },
       }),
     );
-    await send("POST", `/bookings/${BOOKING_ID}/cancel`);
-    expect(payments.callsTo("capture")).toHaveLength(0);
-    expect(payments.callsTo("cancelAuthorisation")).toHaveLength(0);
-    vi.mocked(data.findBookingDetail).mockResolvedValue({
-      ...bookingDetail("user-cian", { booking: { slot: { start: soon, end: soonEnd } } }),
-      host: { id: "host-1", userId: USER_ID, cancellationCutoffMinutes: 120 },
-    });
-    await send("POST", `/bookings/${BOOKING_ID}/cancel`);
-    expect(payments.callsTo("capture")).toHaveLength(0);
-    expect(vi.mocked(data.updateBookingFrom).mock.calls[1]?.[3]).toMatchObject({
-      cancelledBy: "host",
-      cancellationFeeCents: 0,
+    expect((await send("POST", `/bookings/${BOOKING_ID}/cancel`)).statusCode).toBe(200);
+    expect(payments.callsTo("cancelAuthorisation")).toHaveLength(1);
+    expect(paymentData.updateBookingWithRefund).not.toHaveBeenCalled();
+    vi.mocked(data.updateBookingFrom).mockResolvedValueOnce(false);
+    expect((await send("POST", `/bookings/${BOOKING_ID}/cancel`)).statusCode).toBe(409);
+  });
+
+  it("waits while the payment is still going through", async () => {
+    vi.mocked(data.findBookingDetail).mockResolvedValue(
+      bookingDetail(USER_ID, { payment: { status: "pending" } }),
+    );
+    expect((await send("POST", `/bookings/${BOOKING_ID}/cancel`)).json()).toMatchObject({
+      code: "payment-in-progress",
     });
   });
 
@@ -514,8 +700,12 @@ describe("POST /bookings/:id/cancel", () => {
       "detail",
     );
     vi.mocked(data.findBookingDetail).mockResolvedValue(bookingDetail(USER_ID));
-    vi.mocked(data.updateBookingFrom).mockResolvedValueOnce(false);
+    vi.mocked(paymentData.updateBookingWithRefund).mockResolvedValueOnce({
+      changed: false,
+      refund: undefined,
+    });
     expect((await send("POST", `/bookings/${BOOKING_ID}/cancel`)).statusCode).toBe(409);
+    expect(payments.callsTo("refund")).toHaveLength(0);
     vi.mocked(data.findBookingDetail).mockResolvedValue(bookingDetail("user-someone"));
     expect((await send("POST", `/bookings/${BOOKING_ID}/cancel`)).statusCode).toBe(404);
   });

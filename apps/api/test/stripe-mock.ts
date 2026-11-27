@@ -21,17 +21,18 @@ interface IntentState {
  * every request against Stripe's OpenAPI spec but is stateless: it answers
  * from fixtures (a PaymentIntent is always `requires_payment_method`). This
  * wrapper sends each call through for that check, then applies the state
- * changes Stripe documents (an off-session manual-capture confirm leaves the
- * intent `requires_capture`, capture makes it `succeeded`, cancel
- * `canceled`), replays idempotent requests, and lets a test decline the next
- * authorisation.
+ * changes Stripe documents (an off-session confirm makes the intent
+ * `succeeded`, or `requires_capture` with manual capture; capture makes it
+ * `succeeded`, cancel `canceled`; refunds count against what was received),
+ * replays idempotent requests, and lets a test decline the next charge.
  */
 export function statefulStripeMock() {
   const sdk = createStripeSdk("sk_test_ndintegration", STRIPE_MOCK_URL);
   const intents = new Map<string, IntentState>();
   const created: Stripe.PaymentIntentCreateParams[] = [];
   const captures: { id: string; amount: number }[] = [];
-  const transfers: Stripe.TransferCreateParams[] = [];
+  const refunds: Stripe.RefundCreateParams[] = [];
+  const deletedCustomers: string[] = [];
   const cards = new Map<string, { customer: string; card: Stripe.PaymentMethod.Card }>();
   const defaults = new Map<string, string>();
   const replay = new Map<string, unknown>();
@@ -77,6 +78,11 @@ export function statefulStripeMock() {
         const result = await sdk.customers.update(id, params);
         const method = params.invoice_settings?.default_payment_method;
         if (typeof method === "string") defaults.set(id, method);
+        return result;
+      },
+      del: async (id) => {
+        const result = await sdk.customers.del(id);
+        deletedCustomers.push(id);
         return result;
       },
     },
@@ -136,6 +142,10 @@ export function statefulStripeMock() {
           if (params.confirm === true && params.capture_method === "manual") {
             state.status = "requires_capture";
             state.amount_capturable = params.amount;
+          } else if (params.confirm === true) {
+            state.status = "succeeded";
+            state.amount_received = params.amount;
+            state.latest_charge = `ch_${state.id}`;
           }
           return view(state);
         }),
@@ -182,12 +192,26 @@ export function statefulStripeMock() {
           return view(state);
         }),
     },
-    transfers: {
+    refunds: {
       create: (params, options) =>
         once(options?.idempotencyKey, async () => {
-          const transfer = await sdk.transfers.create(params);
-          transfers.push(params);
-          return { id: `${transfer.id}_${String(transfers.length)}` };
+          const state = intents.get(String(params.payment_intent));
+          if (state === undefined)
+            throw new Error(`no PaymentIntent ${String(params.payment_intent)}`);
+          const refund = await sdk.refunds.create(params);
+          const refunded = refunds
+            .filter((earlier) => earlier.payment_intent === params.payment_intent)
+            .reduce((total, earlier) => total + (earlier.amount ?? 0), 0);
+          const amount = params.amount ?? state.amount_received - refunded;
+          if (state.status !== "succeeded" || refunded + amount > state.amount_received) {
+            throw new Stripe.errors.StripeInvalidRequestError({
+              type: "invalid_request_error",
+              code: "charge_already_refunded",
+              message: "Cannot refund more than was charged",
+            });
+          }
+          refunds.push({ ...params, amount });
+          return { id: `${refund.id}_${String(refunds.length)}`, status: "succeeded" };
         }),
     },
   };
@@ -197,7 +221,8 @@ export function statefulStripeMock() {
     intents,
     created,
     captures,
-    transfers,
+    refunds,
+    deletedCustomers,
     /** Saves a card on a customer, as confirming a SetupIntent in the app would. */
     saveCard(customerId: string, paymentMethodId = `pm_card_${String(cards.size + 1)}`) {
       cards.set(paymentMethodId, {

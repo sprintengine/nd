@@ -250,7 +250,7 @@ export function memoryJobs() {
   };
 }
 
-/** Payments that record every call; tests set what the next authorisation returns. */
+/** Payments that record every call; tests set what charges, captures and refunds return. */
 export function fakePayments() {
   const calls: { method: keyof StripePayments; input: unknown }[] = [];
   const cards: SavedCard[] = [
@@ -258,8 +258,16 @@ export function fakePayments() {
   ];
   const state = {
     defaultCardId: "pm_card_visa" as string | null,
-    authorisation: { status: "authorised" } as
-      { status: "authorised" } | { status: "failed"; reason: string } | { status: "error" },
+    /** What the next charge does: go through, decline, or not answer. */
+    charge: { status: "ok" } as
+      | { status: "ok" }
+      | { status: "processing" }
+      | { status: "failed"; reason: string }
+      | { status: "error" },
+    capture: "ok" as "ok" | "lapsed" | "error",
+    release: "ok" as "ok" | "error",
+    refund: "succeeded" as "succeeded" | "pending" | "error",
+    deleteCustomer: "ok" as "ok" | "error",
     intents: 0,
   };
   const record = (method: keyof StripePayments, input: unknown) => {
@@ -287,38 +295,48 @@ export function fakePayments() {
       state.defaultCardId = paymentMethodId;
       return Promise.resolve();
     },
-    authorise: (input) => {
-      record("authorise", input);
+    charge: (input) => {
+      record("charge", input);
       state.intents += 1;
-      const outcome = state.authorisation;
+      const paymentIntentId = `pi_${String(state.intents)}`;
+      const outcome = state.charge;
       if (outcome.status === "error") return Promise.reject(new Error("network down"));
       if (outcome.status === "failed") {
-        return Promise.resolve({
-          status: "failed",
-          paymentIntentId: `pi_${String(state.intents)}`,
-          reason: outcome.reason,
-        });
+        return Promise.resolve({ status: "failed", paymentIntentId, reason: outcome.reason });
       }
-      return Promise.resolve({
-        status: "authorised",
-        paymentIntentId: `pi_${String(state.intents)}`,
-        amountCents: input.amountCents,
-      });
+      if (outcome.status === "processing") {
+        return Promise.resolve({ status: "pending", paymentIntentId });
+      }
+      return Promise.resolve(
+        input.captureMethod === "manual"
+          ? { status: "authorised", paymentIntentId }
+          : { status: "paid", paymentIntentId, chargeId: `ch_${paymentIntentId}` },
+      );
     },
     cancelAuthorisation: (input) => {
       record("cancelAuthorisation", input);
-      return Promise.resolve();
+      return state.release === "error"
+        ? Promise.reject(new Error("network down"))
+        : Promise.resolve();
     },
     capture: (input) => {
       record("capture", input);
-      return Promise.resolve({
-        chargeId: `ch_${input.paymentIntentId}`,
-        amountCents: input.amountCents,
-      });
+      if (state.capture === "error") return Promise.reject(new Error("network down"));
+      if (state.capture === "lapsed") {
+        return Promise.resolve({ status: "failed", reason: "authorisation_expired" });
+      }
+      return Promise.resolve({ status: "paid", chargeId: `ch_${input.paymentIntentId}` });
     },
-    transfer: (input) => {
-      record("transfer", input);
-      return Promise.resolve({ id: "tr_1" });
+    refund: (input) => {
+      record("refund", input);
+      if (state.refund === "error") return Promise.reject(new Error("network down"));
+      return Promise.resolve({ id: `re_${input.idempotencyKey}`, status: state.refund });
+    },
+    deleteCustomer: (customerId) => {
+      record("deleteCustomer", customerId);
+      return state.deleteCustomer === "error"
+        ? Promise.reject(new Error("network down"))
+        : Promise.resolve();
     },
   };
   return {

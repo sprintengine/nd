@@ -1,24 +1,14 @@
 import {
   bookings,
   chargers,
-  disputes,
   type Executor,
   formatTimeRange,
   hosts,
   payments,
-  sessions,
   stripeWebhookEvents,
-  transfers,
   users,
 } from "@nd/db";
-import type {
-  BookingStatus,
-  CancelledBy,
-  Currency,
-  PaymentStatus,
-  TransferHoldReason,
-  TransferStatus,
-} from "@nd/domain";
+import type { BookingStatus, CancelledBy, Currency, PaymentStatus } from "@nd/domain";
 import { and, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 
 import { isSlotTaken } from "../bookings/rules.ts";
@@ -37,6 +27,8 @@ export async function findBookableCharger(db: Executor, chargerId: string) {
       hostId: hosts.id,
       hostUserId: hosts.userId,
       maxSessionsPerDay: hosts.maxSessionsPerDay,
+      stripeAccountId: hosts.stripeAccountId,
+      payoutStatus: hosts.payoutStatus,
     })
     .from(chargers)
     .innerJoin(hosts, eq(hosts.id, chargers.hostId))
@@ -132,6 +124,15 @@ export async function slotTaken(
   return rows.length > 0;
 }
 
+/** How many requests a driver has waiting for hosts' answers. */
+export async function openRequestCount(db: Executor, driverId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(bookings)
+    .where(and(eq(bookings.driverId, driverId), eq(bookings.status, "requested")));
+  return row?.count ?? 0;
+}
+
 export interface NewBooking {
   readonly chargerId: string;
   readonly driverId: string;
@@ -143,21 +144,49 @@ export interface NewBooking {
   readonly currency: Currency;
   readonly kwhCap: number | null;
   readonly vehiclePlate: string;
-  readonly paymentMethodId: string;
 }
 
+/** The payment row a new booking starts with: its price and fees, not yet charged. */
+export interface NewPayment {
+  readonly paymentMethodId: string;
+  readonly amountCents: number;
+  readonly platformFeeCents: number;
+  readonly cardFeeCents: number;
+  readonly captureMethod: "automatic" | "manual";
+}
+
+/** The host's daily cap, checked under the same lock as the insert. */
+export interface DailyCap {
+  readonly hostId: string;
+  readonly day: { start: Date; end: Date };
+  readonly maxSessionsPerDay: number;
+}
+
+/** Why a booking was not inserted. */
+export type InsertRefusal = "slot-taken" | "host-day-full";
+
 /**
- * Inserts a booking and its payment (pending authorisation) in one
- * transaction. The charger row is locked, so a request is checked against
- * slot-holding bookings without a race; a confirmed booking also relies on
- * the exclusion constraint. Resolves to undefined when the slot is taken.
+ * Inserts a booking and its payment (pending) in one transaction. A
+ * transaction-scoped advisory lock on the host serialises bookings of their
+ * chargers, so their daily cap holds under concurrent requests; the charger
+ * row is locked too, so a request is checked against slot-holding bookings
+ * without a race, and a confirmed booking also relies on the exclusion
+ * constraint.
  */
 export function insertBookingWithPayment(
   db: Executor,
   booking: NewBooking,
-): Promise<{ bookingId: string; paymentId: string } | undefined> {
+  payment: NewPayment,
+  cap: DailyCap,
+): Promise<{ bookingId: string; paymentId: string } | InsertRefusal> {
   return db
-    .transaction(async (tx) => {
+    .transaction(async (tx): Promise<{ bookingId: string; paymentId: string } | InsertRefusal> => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`host-bookings:${cap.hostId}`}))`,
+      );
+      if ((await hostBookingsStarting(tx, cap.hostId, cap.day)) >= cap.maxSessionsPerDay) {
+        return "host-day-full";
+      }
       await tx
         .select({ id: chargers.id })
         .from(chargers)
@@ -174,23 +203,26 @@ export function insertBookingWithPayment(
           ),
         )
         .limit(1);
-      if (clash !== undefined) return undefined;
-      const { paymentMethodId, ...values } = booking;
-      const [inserted] = await tx.insert(bookings).values(values).returning({ id: bookings.id });
+      if (clash !== undefined) return "slot-taken";
+      const [inserted] = await tx.insert(bookings).values(booking).returning({ id: bookings.id });
       if (inserted === undefined) throw new Error("booking not inserted");
-      const [payment] = await tx
+      const [row] = await tx
         .insert(payments)
         .values({
           bookingId: inserted.id,
           currency: booking.currency,
-          stripePaymentMethodId: paymentMethodId,
+          stripePaymentMethodId: payment.paymentMethodId,
+          amountCents: payment.amountCents,
+          platformFeeCents: payment.platformFeeCents,
+          cardFeeCents: payment.cardFeeCents,
+          captureMethod: payment.captureMethod,
         })
         .returning({ id: payments.id });
-      if (payment === undefined) throw new Error("payment not inserted");
-      return { bookingId: inserted.id, paymentId: payment.id };
+      if (row === undefined) throw new Error("payment not inserted");
+      return { bookingId: inserted.id, paymentId: row.id };
     })
     .catch((error: unknown) => {
-      if (isSlotTaken(error)) return undefined;
+      if (isSlotTaken(error)) return "slot-taken" as const;
       throw error;
     });
 }
@@ -202,6 +234,7 @@ function bookingDetailQuery(db: Executor, where: SQL | undefined) {
       booking: bookings,
       charger: {
         id: chargers.id,
+        status: chargers.status,
         address: chargers.address,
         location: chargers.location,
         timezone: chargers.timezone,
@@ -210,6 +243,7 @@ function bookingDetailQuery(db: Executor, where: SQL | undefined) {
         id: hosts.id,
         userId: hosts.userId,
         cancellationCutoffMinutes: hosts.cancellationCutoffMinutes,
+        stripeAccountId: hosts.stripeAccountId,
       },
       driver: {
         name: users.name,
@@ -301,7 +335,6 @@ export interface BookingChange {
   readonly cancelledAt?: Date;
   readonly cancelledBy?: CancelledBy;
   readonly cancellationReason?: string;
-  readonly cancellationFeeCents?: number;
 }
 
 /**
@@ -327,10 +360,6 @@ export interface PaymentChange {
   readonly status?: PaymentStatus;
   readonly stripePaymentIntentId?: string | null;
   readonly stripeChargeId?: string | null;
-  readonly authoriseAt?: Date | null;
-  readonly authorisedCents?: number;
-  readonly capturedCents?: number;
-  readonly platformFeeCents?: number;
   readonly failureReason?: string | null;
 }
 
@@ -365,80 +394,6 @@ export async function findPaymentByIntent(
     .from(payments)
     .where(eq(payments.stripePaymentIntentId, paymentIntentId))
     .limit(1);
-  return row;
-}
-
-/** What deciding on a transfer to the host needs. */
-export async function findTransferContext(db: Executor, paymentId: string) {
-  const [row] = await db
-    .select({
-      bookingId: bookings.id,
-      stripeAccountId: hosts.stripeAccountId,
-      payoutStatus: hosts.payoutStatus,
-      taxDetailsComplete: hosts.taxDetailsComplete,
-    })
-    .from(payments)
-    .innerJoin(bookings, eq(bookings.id, payments.bookingId))
-    .innerJoin(chargers, eq(chargers.id, bookings.chargerId))
-    .innerJoin(hosts, eq(hosts.id, chargers.hostId))
-    .where(eq(payments.id, paymentId))
-    .limit(1);
-  if (row === undefined) return undefined;
-  const [latest] = await db
-    .select({ status: sessions.status })
-    .from(sessions)
-    .where(eq(sessions.bookingId, row.bookingId))
-    .orderBy(desc(sessions.createdAt))
-    .limit(1);
-  const [open] = await db
-    .select({ id: disputes.id })
-    .from(disputes)
-    .where(
-      and(
-        eq(disputes.bookingId, row.bookingId),
-        inArray(disputes.status, ["open", "under_review"]),
-      ),
-    )
-    .limit(1);
-  return {
-    ...row,
-    sessionStatus: latest?.status ?? null,
-    disputeOpen: open !== undefined,
-  };
-}
-
-export type TransferContext = NonNullable<Awaited<ReturnType<typeof findTransferContext>>>;
-
-export type Transfer = typeof transfers.$inferSelect;
-
-export async function findTransfer(db: Executor, paymentId: string): Promise<Transfer | undefined> {
-  const [row] = await db
-    .select()
-    .from(transfers)
-    .where(eq(transfers.paymentId, paymentId))
-    .limit(1);
-  return row;
-}
-
-/** Creates or updates the payment's one transfer row. */
-export async function saveTransfer(
-  db: Executor,
-  paymentId: string,
-  values: {
-    readonly amountCents: number;
-    readonly currency: Currency;
-    readonly status: TransferStatus;
-    readonly holdReason: TransferHoldReason | null;
-    readonly stripeTransferId?: string;
-    readonly sentAt?: Date;
-  },
-): Promise<Transfer> {
-  const [row] = await db
-    .insert(transfers)
-    .values({ paymentId, ...values })
-    .onConflictDoUpdate({ target: transfers.paymentId, set: values })
-    .returning();
-  if (row === undefined) throw new Error("transfer not saved");
   return row;
 }
 

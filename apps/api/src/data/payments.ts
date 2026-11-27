@@ -1,0 +1,235 @@
+import { bookings, type Executor, payments, refunds } from "@nd/db";
+import type { BookingStatus, RefundReason, RefundStatus } from "@nd/domain";
+import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+
+import { type BookingChange, updateBookingFrom } from "./bookings.ts";
+
+// Reads and writes behind refunds and resuming payments that stopped half
+// way. Integration tests cover them against Postgres; unit tests mock this
+// module.
+
+export type Refund = typeof refunds.$inferSelect;
+
+/** Refunds that count against what was paid: every one that has not failed. */
+const LIVE_REFUND = ne(refunds.status, "failed");
+
+/**
+ * Records a refund to send, unless it would take more than was paid. The
+ * payment row is locked, so two refunds cannot both pass the check. An
+ * automatic reason is recorded at most once per payment: asking again
+ * returns the refund already recorded. Resolves to undefined when the amount
+ * is more than what is left to refund.
+ */
+export function insertRefund(
+  db: Executor,
+  input: {
+    readonly paymentId: string;
+    readonly amountCents: number;
+    readonly reason: RefundReason;
+    readonly issuedById?: string;
+    readonly note?: string;
+  },
+): Promise<Refund | undefined> {
+  return db.transaction(async (tx) => {
+    const [payment] = await tx
+      .select({ amountCents: payments.amountCents, currency: payments.currency })
+      .from(payments)
+      .where(eq(payments.id, input.paymentId))
+      .for("update");
+    if (payment === undefined) throw new Error(`no payment ${input.paymentId}`);
+    if (input.reason !== "support") {
+      const [existing] = await tx
+        .select()
+        .from(refunds)
+        .where(and(eq(refunds.paymentId, input.paymentId), eq(refunds.reason, input.reason)))
+        .limit(1);
+      if (existing !== undefined) return existing;
+    }
+    const refunded = await refundedCents(tx, input.paymentId);
+    if (input.amountCents > payment.amountCents - refunded) return undefined;
+    const [row] = await tx
+      .insert(refunds)
+      .values({
+        paymentId: input.paymentId,
+        amountCents: input.amountCents,
+        currency: payment.currency,
+        reason: input.reason,
+        issuedById: input.issuedById ?? null,
+        note: input.note ?? null,
+      })
+      .returning();
+    if (row === undefined) throw new Error("refund not inserted");
+    return row;
+  });
+}
+
+/**
+ * Changes a booking still in one of `from` and, in the same transaction,
+ * records the refund the change owes, so a crash cannot lose it. Resolves to
+ * whether the booking changed, and the refund recorded (if one was asked for
+ * and there was something left to refund).
+ */
+export function updateBookingWithRefund(
+  db: Executor,
+  bookingId: string,
+  from: readonly BookingStatus[],
+  change: BookingChange,
+  refund: { paymentId: string; amountCents: number; reason: RefundReason } | undefined,
+): Promise<{ changed: boolean; refund: Refund | undefined }> {
+  return db.transaction(async (tx) => {
+    if (!(await updateBookingFrom(tx, bookingId, from, change))) {
+      return { changed: false, refund: undefined };
+    }
+    return {
+      changed: true,
+      refund: refund === undefined ? undefined : await insertRefund(tx, refund),
+    };
+  });
+}
+
+/** Cents refunded, or being refunded, of a payment. */
+export async function refundedCents(db: Executor, paymentId: string): Promise<number> {
+  const [row] = await db
+    .select({ cents: sql<number>`coalesce(sum(${refunds.amountCents}), 0)::int` })
+    .from(refunds)
+    .where(and(eq(refunds.paymentId, paymentId), LIVE_REFUND));
+  return row?.cents ?? 0;
+}
+
+/** A payment's refunds, oldest first. */
+export function refundsOf(db: Executor, paymentId: string): Promise<Refund[]> {
+  return db
+    .select()
+    .from(refunds)
+    .where(eq(refunds.paymentId, paymentId))
+    .orderBy(asc(refunds.createdAt));
+}
+
+/** Records what Stripe said about a refund still pending. Resolves to whether it changed. */
+export async function updatePendingRefund(
+  db: Executor,
+  refundId: string,
+  change: {
+    readonly status: RefundStatus;
+    readonly stripeRefundId?: string;
+    readonly failureReason?: string | null;
+  },
+): Promise<boolean> {
+  const rows = await db
+    .update(refunds)
+    .set(change)
+    .where(and(eq(refunds.id, refundId), eq(refunds.status, "pending")))
+    .returning({ id: refunds.id });
+  return rows.length > 0;
+}
+
+/** Marks a payment's pending refunds that Stripe has accepted as succeeded. Resolves to how many. */
+export async function confirmPendingRefunds(db: Executor, paymentId: string): Promise<number> {
+  const rows = await db
+    .update(refunds)
+    .set({ status: "succeeded" })
+    .where(
+      and(
+        eq(refunds.paymentId, paymentId),
+        eq(refunds.status, "pending"),
+        sql`${refunds.stripeRefundId} is not null`,
+      ),
+    )
+    .returning({ id: refunds.id });
+  return rows.length;
+}
+
+/**
+ * Payments that stopped half way and need resuming: a charge whose outcome
+ * is not known after `staleBefore`; a hold on a booking that was confirmed
+ * (to capture) or cancelled (to release); a booking still holding its slot
+ * with a payment that failed or was cancelled; and paid payments with a
+ * refund recorded but not sent to Stripe before `staleBefore`.
+ */
+export async function paymentsToResume(
+  db: Executor,
+  staleBefore: Date,
+  limit: number,
+): Promise<string[]> {
+  const stale = sql`${staleBefore.toISOString()}::timestamptz`;
+  const rows = await db
+    .selectDistinct({ id: payments.id })
+    .from(payments)
+    .innerJoin(bookings, eq(bookings.id, payments.bookingId))
+    .leftJoin(
+      refunds,
+      and(
+        eq(refunds.paymentId, payments.id),
+        eq(refunds.status, "pending"),
+        isNull(refunds.stripeRefundId),
+        sql`${refunds.createdAt} < ${stale}`,
+      ),
+    )
+    .where(
+      sql`(${payments.status} = 'pending' and ${payments.updatedAt} < ${stale})
+        or (${payments.status} = 'authorised' and ${bookings.status} in ('confirmed', 'cancelled'))
+        or (${payments.status} in ('failed', 'cancelled') and ${bookings.status} in ('requested', 'confirmed'))
+        or (${payments.status} = 'paid' and ${refunds.id} is not null)`,
+    )
+    .limit(limit);
+  return rows.map((row) => row.id);
+}
+
+/** Refunds recorded but not yet sent to Stripe, oldest first. */
+export async function unsentRefunds(db: Executor, paymentId: string): Promise<Refund[]> {
+  return db
+    .select()
+    .from(refunds)
+    .where(
+      and(
+        eq(refunds.paymentId, paymentId),
+        eq(refunds.status, "pending"),
+        isNull(refunds.stripeRefundId),
+      ),
+    )
+    .orderBy(asc(refunds.createdAt));
+}
+
+/** Whether a user has a refund still in flight, as a driver or as a host. */
+export async function hasRefundInFlight(db: Executor, userId: string): Promise<boolean> {
+  const result = await db.execute<{ found: boolean }>(sql`
+    select exists (
+      select 1 from refunds r
+      join payments p on p.id = r.payment_id
+      join bookings b on b.id = p.booking_id
+      join chargers c on c.id = b.charger_id
+      join hosts h on h.id = c.host_id
+      where r.status = 'pending' and (b.driver_id = ${userId} or h.user_id = ${userId})
+    ) as found
+  `);
+  return result.rows[0]?.found === true;
+}
+
+/** Booking ids whose lifecycle job is due: unanswered requests past expiry, and confirmed bookings past their no-show time. */
+export async function dueLifecycleBookings(
+  db: Executor,
+  input: { now: Date; requestHours: number; noShowGraceMinutes: number; limit: number },
+): Promise<{ expire: string[]; noShow: string[] }> {
+  const now = sql`${input.now.toISOString()}::timestamptz`;
+  const expire = await db
+    .select({ id: bookings.id })
+    .from(bookings)
+    .where(
+      and(
+        eq(bookings.status, "requested"),
+        sql`least(${bookings.createdAt} + make_interval(hours => ${input.requestHours}), lower(${bookings.slot})) <= ${now}`,
+      ),
+    )
+    .limit(input.limit);
+  const noShow = await db
+    .select({ id: bookings.id })
+    .from(bookings)
+    .where(
+      and(
+        inArray(bookings.status, ["confirmed"]),
+        sql`upper(${bookings.slot}) + make_interval(mins => ${input.noShowGraceMinutes}) <= ${now}`,
+      ),
+    )
+    .limit(input.limit);
+  return { expire: expire.map((row) => row.id), noShow: noShow.map((row) => row.id) };
+}

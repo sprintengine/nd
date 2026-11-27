@@ -51,7 +51,7 @@ export const bookingSchema = z
     status: bookingStatusSchema,
     start: z.iso.datetime(),
     end: z.iso.datetime(),
-    quotedAmountCents: z.number().int().describe("The most the driver can be charged"),
+    quotedAmountCents: z.number().int().describe("The booking's price, paid upfront"),
     pricePerHourCents: z.number().int(),
     currency: currencySchema,
     kwhCap: z.number().nullable(),
@@ -61,13 +61,12 @@ export const bookingSchema = z
     cancelledAt: z.iso.datetime().nullable(),
     cancelledBy: cancelledBySchema.nullable(),
     cancellationReason: z.string().nullable(),
-    feeCents: z.number().int().describe("Cancellation or no-show fee charged"),
     payment: z
       .object({
-        status: paymentStatusSchema,
-        authorisedCents: z.number().int(),
-        capturedCents: z.number().int(),
-        authoriseAt: z.iso.datetime().nullable().describe("When a saved card will be authorised"),
+        status: paymentStatusSchema.describe(
+          "`authorised` while a request's price is held on the card, `paid` once charged",
+        ),
+        amountCents: z.number().int(),
       })
       .nullable(),
     addressVisible: z
@@ -103,16 +102,7 @@ export function bookingView(detail: BookingDetail, viewerId: string): BookingVie
     cancelledAt: booking.cancelledAt?.toISOString() ?? null,
     cancelledBy: booking.cancelledBy,
     cancellationReason: booking.cancellationReason,
-    feeCents: booking.cancellationFeeCents,
-    payment:
-      payment === null
-        ? null
-        : {
-            status: payment.status,
-            authorisedCents: payment.authorisedCents,
-            capturedCents: payment.capturedCents,
-            authoriseAt: payment.authoriseAt?.toISOString() ?? null,
-          },
+    payment: payment === null ? null : { status: payment.status, amountCents: payment.amountCents },
     addressVisible,
     address: addressVisible ? charger.address : null,
     location: addressVisible ? charger.location : null,
@@ -155,7 +145,11 @@ const hostListQuery = listQuery
 
 const bookingList = z.object({ bookings: z.array(bookingSchema) });
 
-export function registerBookingRoutes(app: FastifyInstance, services: Services): void {
+export function registerBookingRoutes(
+  app: FastifyInstance,
+  services: Services,
+  bookingRateLimitPerHour: number,
+): void {
   const { db } = services;
   const typed = app.withTypeProvider<ZodTypeProvider>();
 
@@ -174,15 +168,22 @@ export function registerBookingRoutes(app: FastifyInstance, services: Services):
     "/bookings",
     {
       onRequest: requireVerifiedPhone,
+      config: {
+        rateLimit: {
+          max: bookingRateLimitPerHour,
+          timeWindow: "1 hour",
+          keyGenerator: (request) => request.session?.userId ?? request.ip,
+        },
+      },
       schema: {
         summary: "Book a slot",
         description:
-          "Books a charger for a slot inside one of its availability windows. With instant book the booking is confirmed at once; otherwise it waits for the host. The quote is the slot's minutes at the hourly price, with no fee added. A slot starting within 6 days is authorised on the card now (manual capture); a later one keeps the saved card and is authorised 24 hours before the start. An overlapping slot is 409 and nothing is charged; a declined card is 402.",
+          "Books a charger for a slot inside one of its availability windows; the slot is the charging window. The price is the slot's minutes at the hourly price, with no fee added, and is paid upfront: with instant book the booking is confirmed and the card charged at once; otherwise the price is held on the card until the host approves (charged) or declines or lets the request expire after 24 hours (released). A driver may have at most 3 requests waiting, and make a limited number of bookings an hour (429). An overlapping slot is 409 and nothing is charged; a declined card is 402. When the payment provider does not answer, the booking is returned with its payment `pending` and finished in the background.",
         tags: ["bookings"],
         body: createBookingBody,
         response: {
           201: bookingSchema,
-          ...problemResponses(400, 401, 402, 403, 404, 409, 422, 502, 503),
+          ...problemResponses(400, 401, 402, 403, 404, 409, 422, 429, 503),
         },
       },
     },
@@ -274,10 +275,10 @@ export function registerBookingRoutes(app: FastifyInstance, services: Services):
       schema: {
         summary: "Approve a booking request",
         description:
-          "The host of the charger confirms a requested booking; its idTag is issued. 409 if the slot has been taken since.",
+          "The host of the charger confirms a requested booking; its idTag is issued and the price held on the driver's card is charged. 409 if the slot has been taken since or the hold is not in place yet; 402 when the hold has lapsed, which cancels the booking.",
         tags: ["bookings", "hosts"],
         params: bookingParams,
-        response: { 200: bookingSchema, ...problemResponses(400, 401, 403, 404, 409) },
+        response: { 200: bookingSchema, ...problemResponses(400, 401, 402, 403, 404, 409) },
       },
     },
     async (request) => {
@@ -293,7 +294,7 @@ export function registerBookingRoutes(app: FastifyInstance, services: Services):
       onRequest: requireVerifiedPhone,
       schema: {
         summary: "Decline a booking request",
-        description: "The host turns a request down; the card authorisation is released.",
+        description: "The host turns a request down; the hold on the driver's card is released.",
         tags: ["bookings", "hosts"],
         params: bookingParams,
         body: reasonBody,
@@ -314,7 +315,7 @@ export function registerBookingRoutes(app: FastifyInstance, services: Services):
       schema: {
         summary: "Cancel a booking",
         description:
-          "The driver or the host cancels a requested or confirmed booking. A driver cancelling a confirmed booking after the host's cutoff (default 2 hours before the start) pays one hour at the hourly price, capped at the quote; otherwise the authorisation is released. Once the driver has arrived a booking can only be stopped (409).",
+          "The driver or the host cancels a requested or confirmed booking. A request's hold is released. A confirmed booking is refunded in full when the host cancels or the driver cancels before the host's cutoff (default 2 hours before the start), and not at all when the driver cancels after it. Once the driver has arrived a booking can only be stopped (409).",
         tags: ["bookings"],
         params: bookingParams,
         body: reasonBody,

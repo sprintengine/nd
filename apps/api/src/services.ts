@@ -1,4 +1,5 @@
 import type { Executor } from "@nd/db";
+import type { FeeSettings } from "@nd/domain";
 
 import type { Clock } from "./deps.ts";
 import type { JobLogger, JobQueue } from "./jobs/jobs.ts";
@@ -12,11 +13,13 @@ export interface Services {
   readonly clock: Clock;
   readonly payments: StripePayments;
   readonly jobs: JobQueue;
-  /** Platform fee in basis points, kept back from each transfer to the host. */
-  readonly platformFeeBps: number;
+  /** The platform fee and the card fee passed on to hosts: each charge's application fee. */
+  readonly fees: FeeSettings;
+  /** Years a deleted host's tax details are kept for platform reporting. */
+  readonly taxRecordRetentionYears: number;
   readonly log: JobLogger;
   /** Booking and settlement durations; production keeps the defaults. */
   readonly timings: Timings;
-  /** Notices to drivers and hosts (session closed without a stop, payout summaries). */
+  /** Email to drivers and hosts. */
   readonly email: EmailSender;
 }

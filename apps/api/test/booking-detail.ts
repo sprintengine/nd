@@ -11,16 +11,15 @@ export function payment(overrides: Partial<Payment> = {}): Payment {
     id: PAYMENT_ID,
     bookingId: BOOKING_ID,
     stripePaymentIntentId: "pi_1",
-    stripeSetupIntentId: null,
     stripePaymentMethodId: "pm_card_visa",
-    stripeChargeId: null,
+    stripeChargeId: "ch_1",
     failureReason: null,
-    authoriseAt: null,
-    authorisedCents: 1000,
-    capturedCents: 0,
+    amountCents: 1000,
     platformFeeCents: 0,
+    cardFeeCents: 40,
     currency: "EUR",
-    status: "authorised",
+    status: "paid",
+    captureMethod: "automatic",
     createdAt: new Date("2027-01-01T00:00:00Z"),
     updatedAt: new Date("2027-01-01T00:00:00Z"),
     ...overrides,
@@ -34,6 +33,7 @@ export function bookingDetail(
     booking?: Partial<BookingDetail["booking"]>;
     payment?: Partial<Payment> | null;
     host?: Partial<BookingDetail["host"]>;
+    charger?: Partial<BookingDetail["charger"]>;
     driver?: Partial<BookingDetail["driver"]>;
   } = {},
 ): BookingDetail {
@@ -57,18 +57,25 @@ export function bookingDetail(
       cancelledAt: null,
       cancelledBy: null,
       cancellationReason: null,
-      cancellationFeeCents: 0,
       createdAt: new Date("2027-01-10T12:00:00Z"),
       updatedAt: new Date("2027-01-10T12:00:00Z"),
       ...overrides.booking,
     },
     charger: {
       id: CHARGER_ID,
+      status: "online",
       address: "7 Test Row, Dublin 6",
       location: { lat: 53.33, lng: -6.25 },
       timezone: "Europe/Dublin",
+      ...overrides.charger,
     },
-    host: { id: "host-1", userId: HOST_USER_ID, cancellationCutoffMinutes: 120, ...overrides.host },
+    host: {
+      id: "host-1",
+      userId: HOST_USER_ID,
+      cancellationCutoffMinutes: 120,
+      stripeAccountId: "acct_host",
+      ...overrides.host,
+    },
     driver: { name: "Cian Byrne", stripeCustomerId: "cus_1", ...overrides.driver },
     payment: overrides.payment === null ? null : payment(overrides.payment),
   };

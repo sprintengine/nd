@@ -1,19 +1,14 @@
 import { randomBytes } from "node:crypto";
 
-import { availabilityRules, bookings, chargers, hosts, payments, transfers, users } from "@nd/db";
+import { availabilityRules, bookings, chargers, hosts, payments, refunds, users } from "@nd/db";
 import { eq, sql } from "drizzle-orm";
 import Stripe from "stripe";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { type Harness, startHarness } from "../../test/harness.ts";
 import { APP_ORIGIN } from "../../test/http.ts";
-import {
-  authoriseBookingJob,
-  expireRequestJob,
-  hostTransferJob,
-  noShowJob,
-} from "../bookings/jobs.ts";
-import { captureForBooking, createHostTransfer } from "../payments/settlement.ts";
+import { expireRequestJob, noShowJob, resumePaymentJob } from "../bookings/jobs.ts";
+import { createBooking } from "../bookings/lifecycle.ts";
 import type { Services } from "../services.ts";
 import { stripePaymentsFrom } from "../stripe/payments.ts";
 import { DEFAULT_TIMINGS } from "../timings.ts";
@@ -65,6 +60,7 @@ async function listCharger({ instantBook = true } = {}): Promise<string> {
       userId: hostUserId,
       payoutStatus: "enabled",
       stripeAccountId: "acct_host_1",
+      taxDetailsComplete: true,
       maxSessionsPerDay: 10,
     })
     .onConflictDoUpdate({ target: hosts.userId, set: { payoutStatus: "enabled" } })
@@ -114,15 +110,9 @@ interface BookingBody {
   id: string;
   status: string;
   quotedAmountCents: number;
-  feeCents: number;
   addressVisible: boolean;
   address: string | null;
-  payment: {
-    status: string;
-    authorisedCents: number;
-    capturedCents: number;
-    authoriseAt: string | null;
-  };
+  payment: { status: string; amountCents: number };
 }
 
 async function booked(chargerId: string, start: Date, hours = 4): Promise<BookingBody> {
@@ -138,6 +128,10 @@ async function paymentOf(bookingId: string) {
     .where(eq(payments.bookingId, bookingId));
   if (row === undefined) throw new Error("no payment");
   return row;
+}
+
+async function refundsOf(paymentId: string) {
+  return h.database.db.select().from(refunds).where(eq(refunds.paymentId, paymentId));
 }
 
 async function bookingRow(bookingId: string) {
@@ -195,7 +189,8 @@ beforeAll(async () => {
     clock,
     payments: stripePaymentsFrom(h.stripeMock.sdk),
     jobs: h.jobs,
-    platformFeeBps: 0,
+    fees: { platformFeeBps: 0, cardFeeBps: 150, cardFeeFixedCents: 25 },
+    taxRecordRetentionYears: 6,
     timings: DEFAULT_TIMINGS,
     log: { info: () => undefined, warn: () => undefined, error: () => undefined },
     email: h.mail.email,
@@ -257,15 +252,14 @@ describe("payment methods", () => {
 });
 
 describe("POST /bookings", () => {
-  it("quotes 4 hours at €2.50 at 1000 cents with no fee, and authorises it at once", async () => {
+  it("prices 4 hours at €2.50 at 1000 cents and charges it upfront to the host's account", async () => {
     const chargerId = await listCharger();
     const before = h.stripeMock.created.length;
     const body = await booked(chargerId, nightIn(2), 4);
     expect(body).toMatchObject({
       status: "confirmed",
       quotedAmountCents: 1000,
-      feeCents: 0,
-      payment: { status: "authorised", authorisedCents: 1000, capturedCents: 0 },
+      payment: { status: "paid", amountCents: 1000 },
       addressVisible: true,
       address: "7 Test Row, Dublin 6",
     });
@@ -274,18 +268,23 @@ describe("POST /bookings", () => {
     expect(params).toMatchObject({
       amount: 1000,
       currency: "eur",
-      capture_method: "manual",
+      capture_method: "automatic",
       confirm: true,
       off_session: true,
       payment_method: "pm_card_driver",
+      // A destination charge: the card fee estimate (1.5 % + 25 cents) is passed on to the host.
+      transfer_data: { destination: "acct_host_1" },
+      application_fee_amount: 40,
       transfer_group: body.id,
     });
-    expect(params).not.toHaveProperty("application_fee_amount");
-    expect(params).not.toHaveProperty("transfer_data");
     const payment = await paymentOf(body.id);
-    expect(h.stripeMock.intents.get(payment.stripePaymentIntentId ?? "")?.status).toBe(
-      "requires_capture",
-    );
+    expect(payment).toMatchObject({
+      amountCents: 1000,
+      cardFeeCents: 40,
+      platformFeeCents: 0,
+      captureMethod: "automatic",
+    });
+    expect(h.stripeMock.intents.get(payment.stripePaymentIntentId ?? "")?.status).toBe("succeeded");
     const row = await bookingRow(body.id);
     expect(row.idTag).toMatch(/^[A-Z2-9]{20}$/);
     expect(row.pricePerHourCents).toBe(250);
@@ -303,88 +302,99 @@ describe("POST /bookings", () => {
     expect(h.stripeMock.created.length).toBe(before);
   });
 
-  it("saves the card for a far slot and authorises it with a job 24 hours ahead", async () => {
+  it("charges a slot weeks away upfront as well", async () => {
     const chargerId = await listCharger();
-    const start = nightIn(10);
-    const before = h.stripeMock.created.length;
-    const body = await booked(chargerId, start, 4);
-    const authoriseAt = new Date(start.getTime() - 24 * HOUR);
-    expect(body.payment).toMatchObject({
-      status: "card_saved",
-      authorisedCents: 0,
-      authoriseAt: authoriseAt.toISOString(),
-    });
-    expect(h.stripeMock.created.length).toBe(before);
-
-    const jobs = await h.database.db.execute<{ start_after: Date; singleton_key: string }>(
-      sql`select start_after, singleton_key from pgboss.job
-          where name = ${authoriseBookingJob.name} and data->>'bookingId' = ${body.id}`,
-    );
-    expect(jobs.rows).toHaveLength(1);
-    expect(new Date(jobs.rows[0]?.start_after ?? 0).toISOString()).toBe(authoriseAt.toISOString());
-    expect(jobs.rows[0]?.singleton_key).toBe(body.id);
-
-    await h.jobs.runNow(authoriseBookingJob, { bookingId: body.id });
-    const payment = await paymentOf(body.id);
-    expect(payment).toMatchObject({ status: "authorised", authorisedCents: 1000 });
-    expect(h.stripeMock.intents.get(payment.stripePaymentIntentId ?? "")?.status).toBe(
-      "requires_capture",
-    );
-    // Running it again changes nothing.
-    await h.jobs.runNow(authoriseBookingJob, { bookingId: body.id });
-    expect(h.stripeMock.created.length).toBe(before + 1);
+    const body = await booked(chargerId, nightIn(30), 4);
+    expect(body.payment).toEqual({ status: "paid", amountCents: 1000 });
   });
 
-  it("cancels the booking at no charge when the saved card is declined on the last attempt", async () => {
-    const chargerId = await listCharger();
-    const body = await booked(chargerId, nightIn(11), 4);
-    h.stripeMock.declineNext("insufficient_funds");
-    await h.jobs.runNow(authoriseBookingJob, { bookingId: body.id });
-    expect(await paymentOf(body.id)).toMatchObject({
-      status: "failed",
-      failureReason: "insufficient_funds",
-    });
-    expect(await bookingRow(body.id)).toMatchObject({
-      status: "cancelled",
-      cancelledBy: "system",
-      cancellationReason: "payment_failed: insufficient_funds",
-    });
-  });
-
-  it("answers 402 and cancels the booking when the card is declined at booking", async () => {
+  it("answers 402 and cancels the booking when the card is declined", async () => {
     const chargerId = await listCharger();
     h.stripeMock.declineNext("card_declined");
     const response = await book(chargerId, nightIn(1), 3);
     expect(response.statusCode).toBe(402);
     expect(response.json()).toMatchObject({ code: "payment-declined" });
     const [row] = await h.database.db
-      .select({ status: bookings.status })
+      .select({ id: bookings.id, status: bookings.status })
       .from(bookings)
       .where(eq(bookings.chargerId, chargerId));
     expect(row?.status).toBe("cancelled");
+    expect(await paymentOf(row?.id ?? "")).toMatchObject({
+      status: "failed",
+      failureReason: "card_declined",
+    });
     // The slot is free again.
     expect((await book(chargerId, nightIn(1), 3)).statusCode).toBe(201);
   });
 
-  it("keeps windows inside the host's availability and under the daily cap", async () => {
+  it("keeps windows inside the host's availability", async () => {
     const chargerId = await listCharger();
     const morning = new Date(nightIn(4).getTime() + 9 * HOUR); // 07:00 → 09:00 runs past 08:00
     const outside = await book(chargerId, morning, 2);
     expect(outside.statusCode).toBe(422);
     expect(outside.json()).toMatchObject({ code: "outside-availability" });
+  });
 
+  it("holds the host's daily cap when bookings race", async () => {
+    const chargerId = await listCharger();
+    const other = await listCharger();
     await h.database.db
       .update(hosts)
       .set({ maxSessionsPerDay: 1 })
       .where(eq(hosts.userId, hostUserId));
-    await booked(chargerId, nightIn(13), 1);
-    const second = await book(chargerId, new Date(nightIn(13).getTime() + HOUR), 1);
-    expect(second.statusCode).toBe(409);
-    expect(second.json()).toMatchObject({ code: "host-day-full" });
-    await h.database.db
-      .update(hosts)
-      .set({ maxSessionsPerDay: 10 })
-      .where(eq(hosts.userId, hostUserId));
+    try {
+      const start = nightIn(13);
+      // Two drivers book two of the host's chargers for the same night at the same moment.
+      const [first, second] = await Promise.all([
+        createBooking(services, {
+          driverId,
+          chargerId,
+          window: { start, end: new Date(start.getTime() + HOUR) },
+          vehiclePlate: "251-D-1",
+          paymentMethodId: undefined,
+        }).then(
+          () => "booked",
+          (error: unknown) => (error as { code?: string }).code,
+        ),
+        createBooking(services, {
+          driverId,
+          chargerId: other,
+          window: { start, end: new Date(start.getTime() + HOUR) },
+          vehiclePlate: "251-D-2",
+          paymentMethodId: undefined,
+        }).then(
+          () => "booked",
+          (error: unknown) => (error as { code?: string }).code,
+        ),
+      ]);
+      expect([first, second].sort()).toEqual(["booked", "host-day-full"]);
+    } finally {
+      await h.database.db
+        .update(hosts)
+        .set({ maxSessionsPerDay: 10 })
+        .where(eq(hosts.userId, hostUserId));
+    }
+  });
+
+  it("lets a driver keep at most 3 requests waiting", async () => {
+    const chargerId = await listCharger({ instantBook: false });
+    const asker = await h.user("fionn@example.com", "+353861230106");
+    const [askerUser] = await h.database.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, "fionn@example.com"));
+    await call("POST", "/me/payment-methods/setup-intent", asker);
+    const [row] = await h.database.db
+      .select({ customerId: users.stripeCustomerId })
+      .from(users)
+      .where(eq(users.id, askerUser?.id ?? ""));
+    h.stripeMock.saveCard(row?.customerId ?? "", "pm_card_fionn");
+    for (const days of [20, 21, 22]) {
+      expect((await book(chargerId, nightIn(days), 1, asker)).statusCode).toBe(201);
+    }
+    const fourth = await book(chargerId, nightIn(23), 1, asker);
+    expect(fourth.statusCode).toBe(409);
+    expect(fourth.json()).toMatchObject({ code: "too-many-requests" });
   });
 
   it("needs a verified phone and a saved card", async () => {
@@ -399,7 +409,7 @@ describe("POST /bookings", () => {
 });
 
 describe("cancellation", () => {
-  it("before the cutoff releases the authorisation", async () => {
+  it("before the cutoff refunds the driver in full, reversing the host's share and the fee", async () => {
     const chargerId = await listCharger();
     const body = await booked(chargerId, nightIn(2), 4);
     const response = await call("POST", `/bookings/${body.id}/cancel`, driver, {});
@@ -407,51 +417,42 @@ describe("cancellation", () => {
     expect(response.json()).toMatchObject({
       status: "cancelled",
       cancelledBy: "driver",
-      feeCents: 0,
-      payment: { status: "cancelled", capturedCents: 0 },
+      payment: { status: "paid" },
       addressVisible: false,
       address: null,
     });
     const payment = await paymentOf(body.id);
-    expect(h.stripeMock.intents.get(payment.stripePaymentIntentId ?? "")?.status).toBe("canceled");
+    expect(await refundsOf(payment.id)).toMatchObject([
+      { amountCents: 1000, reason: "driver_cancelled", status: "succeeded" },
+    ]);
+    expect(h.stripeMock.refunds.at(-1)).toMatchObject({
+      payment_intent: payment.stripePaymentIntentId,
+      amount: 1000,
+      reverse_transfer: true,
+      refund_application_fee: true,
+    });
     const again = await call("POST", `/bookings/${body.id}/cancel`, driver, {});
     expect(again.statusCode).toBe(409);
   });
 
-  it("after the cutoff captures only the fee of one hour, and holds the host's transfer", async () => {
+  it("after the cutoff refunds the driver nothing", async () => {
     const chargerId = await listCharger();
     const start = nightIn(3);
     const body = await booked(chargerId, start, 4);
+    const refundsBefore = h.stripeMock.refunds.length;
     clock.current = new Date(start.getTime() - HOUR);
     try {
       const response = await call("POST", `/bookings/${body.id}/cancel`, driver, {});
       expect(response.statusCode, response.body).toBe(200);
-      expect(response.json()).toMatchObject({
-        status: "cancelled",
-        feeCents: 250,
-        payment: { status: "captured", authorisedCents: 1000, capturedCents: 250 },
-      });
+      expect(response.json()).toMatchObject({ status: "cancelled", payment: { status: "paid" } });
     } finally {
       clock.current = new Date();
     }
-    const payment = await paymentOf(body.id);
-    const intent = h.stripeMock.intents.get(payment.stripePaymentIntentId ?? "");
-    expect(intent).toMatchObject({ status: "succeeded", amount_received: 250 });
-    expect(payment.stripeChargeId).toBe(intent?.latest_charge);
-
-    await h.jobs.drain();
-    const [transfer] = await h.database.db
-      .select()
-      .from(transfers)
-      .where(eq(transfers.paymentId, payment.id));
-    expect(transfer).toMatchObject({
-      status: "held",
-      holdReason: "tax_details_incomplete",
-      amountCents: 250,
-    });
+    expect(await refundsOf((await paymentOf(body.id)).id)).toEqual([]);
+    expect(h.stripeMock.refunds.length).toBe(refundsBefore);
   });
 
-  it("is free for the driver when the host cancels", async () => {
+  it("refunds the driver in full when the host cancels, however late", async () => {
     const chargerId = await listCharger();
     const start = nightIn(4);
     const body = await booked(chargerId, start, 2);
@@ -464,11 +465,13 @@ describe("cancellation", () => {
         role: "host",
         cancelledBy: "host",
         cancellationReason: "Charger needs a repair",
-        feeCents: 0,
       });
     } finally {
       clock.current = new Date();
     }
+    expect(await refundsOf((await paymentOf(body.id)).id)).toMatchObject([
+      { amountCents: 500, reason: "host_cancelled", status: "succeeded" },
+    ]);
   });
 
   it("is refused once the driver has arrived, and to strangers", async () => {
@@ -481,13 +484,49 @@ describe("cancellation", () => {
     expect(response.statusCode).toBe(409);
     expect(response.json()).toMatchObject({ code: "cannot-cancel" });
   });
+
+  it("records the refund with the cancellation, so a refund Stripe did not take is resumed", async () => {
+    const chargerId = await listCharger();
+    const body = await booked(chargerId, nightIn(9), 2);
+    const payment = await paymentOf(body.id);
+    // The refund was recorded, but the process stopped before Stripe was called.
+    await h.database.db
+      .update(bookings)
+      .set({ status: "cancelled", cancelledAt: new Date(), cancelledBy: "driver" })
+      .where(eq(bookings.id, body.id));
+    await h.database.db.insert(refunds).values({
+      paymentId: payment.id,
+      amountCents: 500,
+      currency: "EUR",
+      reason: "driver_cancelled",
+    });
+    await h.jobs.runNow(resumePaymentJob, { paymentId: payment.id });
+    expect(await refundsOf(payment.id)).toMatchObject([{ status: "succeeded" }]);
+    const sent = h.stripeMock.refunds.filter(
+      (refund) => refund.payment_intent === payment.stripePaymentIntentId,
+    );
+    expect(sent).toHaveLength(1);
+    // Resuming again sends nothing more.
+    await h.jobs.runNow(resumePaymentJob, { paymentId: payment.id });
+    expect(
+      h.stripeMock.refunds.filter(
+        (refund) => refund.payment_intent === payment.stripePaymentIntentId,
+      ),
+    ).toHaveLength(1);
+  });
 });
 
 describe("host approval", () => {
-  it("approves a request: confirmed, with an idTag", async () => {
+  it("holds a request's price, and charges it when the host approves", async () => {
     const chargerId = await listCharger({ instantBook: false });
     const body = await booked(chargerId, nightIn(2), 3);
-    expect(body).toMatchObject({ status: "requested", addressVisible: false, address: null });
+    expect(body).toMatchObject({
+      status: "requested",
+      addressVisible: false,
+      address: null,
+      payment: { status: "authorised" },
+    });
+    expect(h.stripeMock.created.at(-1)).toMatchObject({ capture_method: "manual" });
     expect((await bookingRow(body.id)).idTag).toBeNull();
     expect(
       (await call("POST", `/bookings/${body.id}/approve`, driver)).statusCode,
@@ -495,12 +534,18 @@ describe("host approval", () => {
     ).toBe(404);
     const response = await call("POST", `/bookings/${body.id}/approve`, hostCookie);
     expect(response.statusCode, response.body).toBe(200);
-    expect(response.json()).toMatchObject({ status: "confirmed", role: "host" });
+    expect(response.json()).toMatchObject({
+      status: "confirmed",
+      role: "host",
+      payment: { status: "paid", amountCents: 750 },
+    });
     expect((await bookingRow(body.id)).idTag).toMatch(/^[A-Z2-9]{20}$/);
+    const payment = await paymentOf(body.id);
+    expect(h.stripeMock.intents.get(payment.stripePaymentIntentId ?? "")?.status).toBe("succeeded");
     expect((await call("POST", `/bookings/${body.id}/approve`, hostCookie)).statusCode).toBe(409);
   });
 
-  it("declines a request and cancels its PaymentIntent", async () => {
+  it("declines a request and releases its hold", async () => {
     const chargerId = await listCharger({ instantBook: false });
     const body = await booked(chargerId, nightIn(3), 3);
     const response = await call("POST", `/bookings/${body.id}/decline`, hostCookie, {});
@@ -515,13 +560,20 @@ describe("host approval", () => {
     expect(h.stripeMock.intents.get(payment.stripePaymentIntentId ?? "")?.status).toBe("canceled");
   });
 
-  it("expires a request the host never answered, releasing the authorisation", async () => {
+  it("expires a request the host did not answer within 24 hours, releasing the hold", async () => {
     const chargerId = await listCharger({ instantBook: false });
     const start = nightIn(4);
     const body = await booked(chargerId, start, 3);
+    const jobs = await h.database.db.execute<{ start_after: Date }>(
+      sql`select start_after from pgboss.job
+          where name = ${expireRequestJob.name} and data->>'bookingId' = ${body.id}`,
+    );
+    const expiresAt = new Date(jobs.rows[0]?.start_after ?? 0);
+    const created = (await bookingRow(body.id)).createdAt;
+    expect(expiresAt.toISOString()).toBe(new Date(created.getTime() + 24 * HOUR).toISOString());
     await h.jobs.runNow(expireRequestJob, { bookingId: body.id });
-    expect((await bookingRow(body.id)).status, "not before the slot starts").toBe("requested");
-    clock.current = new Date(start.getTime() + 60_000);
+    expect((await bookingRow(body.id)).status, "not before it expires").toBe("requested");
+    clock.current = new Date(expiresAt.getTime() + 60_000);
     try {
       await h.jobs.runNow(expireRequestJob, { bookingId: body.id });
     } finally {
@@ -536,7 +588,7 @@ describe("host approval", () => {
 });
 
 describe("no-show job", () => {
-  it("marks a confirmed booking never arrived at as a no-show and captures the fee", async () => {
+  it("marks a confirmed booking never arrived at as a no-show, keeping what was paid", async () => {
     const chargerId = await listCharger();
     const start = nightIn(2);
     const body = await booked(chargerId, start, 4);
@@ -553,44 +605,10 @@ describe("no-show job", () => {
     } finally {
       clock.current = new Date();
     }
-    expect(await bookingRow(body.id)).toMatchObject({
-      status: "no_show",
-      cancellationFeeCents: 250,
-    });
-    expect(await paymentOf(body.id)).toMatchObject({ status: "captured", capturedCents: 250 });
-  });
-});
-
-describe("capture and transfer helpers", () => {
-  it("never capture above the authorisation, are idempotent, and transfer from the charge", async () => {
-    const chargerId = await listCharger();
-    const body = await booked(chargerId, nightIn(5), 4);
-    await expect(captureForBooking(services, body.id, 1001)).rejects.toThrow(RangeError);
-    const first = await captureForBooking(services, body.id, 900);
-    const second = await captureForBooking(services, body.id, 900);
-    expect(second).toEqual(first);
-    await expect(captureForBooking(services, body.id, 800)).rejects.toThrow(/another amount/);
-
-    await h.database.db
-      .update(hosts)
-      .set({ taxDetailsComplete: true })
-      .where(eq(hosts.userId, hostUserId));
-    const transfer = await createHostTransfer(services, first.paymentId);
-    expect(transfer).toMatchObject({ status: "sent", amountCents: 900, holdReason: null });
-    expect(h.stripeMock.transfers.at(-1)).toMatchObject({
-      amount: 900,
-      currency: "eur",
-      destination: "acct_host_1",
-      source_transaction: first.chargeId,
-      transfer_group: body.id,
-    });
-    const forBooking = () =>
-      h.stripeMock.transfers.filter((sent) => sent.transfer_group === body.id).length;
-    expect(forBooking()).toBe(1);
-    expect(await createHostTransfer(services, first.paymentId)).toMatchObject({ status: "sent" });
-    await h.jobs.send(hostTransferJob, { paymentId: first.paymentId });
-    await h.jobs.drain();
-    expect(forBooking()).toBe(1);
+    expect((await bookingRow(body.id)).status).toBe("no_show");
+    const payment = await paymentOf(body.id);
+    expect(payment.status).toBe("paid");
+    expect(await refundsOf(payment.id)).toEqual([]);
   });
 });
 
@@ -692,7 +710,7 @@ describe("POST /webhooks/stripe", () => {
   });
 
   it("records PaymentIntent events against the payment", async () => {
-    const chargerId = await listCharger();
+    const chargerId = await listCharger({ instantBook: false });
     const body = await booked(chargerId, nightIn(8), 2);
     const payment = await paymentOf(body.id);
     const { payload, signature } = signed({

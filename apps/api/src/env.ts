@@ -1,5 +1,12 @@
 import { port } from "@nd/config";
-import { STALE_SESSION_GRACE_MINUTES, START_TIMEOUT_SECONDS } from "@nd/domain";
+import {
+  ARRIVAL_LEAD_MINUTES,
+  DEFAULT_CARD_FEE_BPS,
+  DEFAULT_CARD_FEE_FIXED_CENTS,
+  type FeeSettings,
+  STALE_SESSION_GRACE_MINUTES,
+  START_TIMEOUT_SECONDS,
+} from "@nd/domain";
 import { z } from "zod";
 
 import { MIN_BOOKING_MINUTES } from "./bookings/rules.ts";
@@ -182,8 +189,21 @@ export const apiEnvSchema = z
     STRIPE_SECRET_KEY: optionalSecret,
     /** Signing secret of the Stripe webhook endpoint; without it POST /webhooks/stripe answers 503. */
     STRIPE_WEBHOOK_SECRET: optionalSecret,
-    /** The platform's fee on each capture, in basis points (100 = 1 %). Default 0. */
+    /** The platform's fee on each booking, in basis points (100 = 1 %). Default 0. */
     PLATFORM_FEE_BPS: z.coerce.number().int().min(0).max(10_000).default(0),
+    /** The card fee estimate passed on to hosts, in basis points of the price. Default 150 (1.5 %). */
+    CARD_FEE_BPS: z.coerce.number().int().min(0).max(10_000).default(DEFAULT_CARD_FEE_BPS),
+    /** … plus this many cents per booking. Default 25. */
+    CARD_FEE_FIXED_CENTS: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(1_000)
+      .default(DEFAULT_CARD_FEE_FIXED_CENTS),
+    /** How many bookings one driver may make in an hour. */
+    BOOKING_RATE_LIMIT_PER_HOUR: z.coerce.number().int().min(1).default(20),
+    /** Years a deleted host's tax details are kept for platform reporting, then purged. */
+    TAX_RECORD_RETENTION_YEARS: z.coerce.number().int().min(1).max(20).default(6),
     /** Alternative Stripe API base URL, e.g. stripe-mock in end-to-end tests. */
     STRIPE_API_BASE_URL: optional(z.url({ protocol: /^https?$/ })),
     /** OCPP URL hosts paste into their charger account. Must end in `/`. */
@@ -232,6 +252,13 @@ export const apiEnvSchema = z
       .min(1)
       .max(24 * 60)
       .default(MIN_BOOKING_MINUTES),
+    /** How long before the slot a driver may arrive and plug in; charging starts at the slot. */
+    ARRIVAL_LEAD_MINUTES: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(24 * 60)
+      .default(ARRIVAL_LEAD_MINUTES),
   })
   .superRefine((env, context) => {
     const pairs = [
@@ -380,8 +407,12 @@ export interface ApiConfig {
   readonly onboardingWaitMaxSeconds: number;
   /** Verifies Stripe webhook signatures; unset turns the webhook endpoint off (503). */
   readonly stripeWebhookSecret: string | undefined;
-  /** Platform fee in basis points, kept back from each transfer to the host. */
-  readonly platformFeeBps: number;
+  /** The platform fee and the card fee passed on to hosts, kept back from each charge. */
+  readonly fees: FeeSettings;
+  /** Bookings one driver may make in an hour. */
+  readonly bookingRateLimitPerHour: number;
+  /** Years a deleted host's tax details are kept, then purged. */
+  readonly taxRecordRetentionYears: number;
   /** Keys for hosts' tax details; without them saving tax details answers 503. */
   readonly taxKeys: TaxKeyring | undefined;
   /** Users allowed to use the /admin routes. */
@@ -392,6 +423,8 @@ export interface ApiConfig {
   readonly staleSessionGraceMinutes: number;
   /** Shortest booking, in minutes. */
   readonly minBookingMinutes: number;
+  /** How long before the slot a driver may arrive, in minutes. */
+  readonly arrivalLeadMinutes: number;
 }
 
 /** Turns the parsed environment into application settings. */
@@ -422,11 +455,18 @@ export function configFromEnv(env: ApiEnv): ApiConfig {
     ocppWssUrl: env.OCPP_WSS_URL,
     onboardingWaitMaxSeconds: env.ONBOARDING_WAIT_MAX_SECONDS,
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
-    platformFeeBps: env.PLATFORM_FEE_BPS,
+    fees: {
+      platformFeeBps: env.PLATFORM_FEE_BPS,
+      cardFeeBps: env.CARD_FEE_BPS,
+      cardFeeFixedCents: env.CARD_FEE_FIXED_CENTS,
+    },
+    bookingRateLimitPerHour: env.BOOKING_RATE_LIMIT_PER_HOUR,
+    taxRecordRetentionYears: env.TAX_RECORD_RETENTION_YEARS,
     taxKeys: env.TAX_ENCRYPTION_KEYS,
     adminUserIds: env.ADMIN_USER_IDS,
     sessionStartTimeoutSeconds: env.SESSION_START_TIMEOUT_SECONDS,
     staleSessionGraceMinutes: env.STALE_SESSION_GRACE_MINUTES,
     minBookingMinutes: env.MIN_BOOKING_MINUTES,
+    arrivalLeadMinutes: env.ARRIVAL_LEAD_MINUTES,
   };
 }
