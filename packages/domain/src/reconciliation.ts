@@ -1,20 +1,16 @@
 import type { SessionReviewReason } from "./status.ts";
 
-// Rules for settling a session once it has stopped: checking the meter,
-// closing a session whose StopTransaction never came, and how long a host
-// has to confirm one closed that way.
+// Rules for closing a session once it has stopped: checking the meter (the
+// energy is shown on the receipt; the booking was paid upfront) and closing
+// a session whose StopTransaction never came.
 
 const MINUTE_MS = 60_000;
-const HOUR_MS = 60 * MINUTE_MS;
 
 /** The meter delta and the last MeterValue may disagree by at most this many Wh (0.2 kWh). */
 export const METER_TOLERANCE_WH = 200;
 
 /** An open session is closed from its last MeterValue this long after its slot ends. */
 export const STALE_SESSION_GRACE_MINUTES = 10;
-
-/** A session closed without a StopTransaction is billed after the host confirms or this long passes. */
-export const HOST_CONFIRMATION_HOURS = 72;
 
 /** What a session's meter readings say. */
 export type MeterCheck =
@@ -66,9 +62,4 @@ export function staleSessionCloseAt(
   graceMinutes: number = STALE_SESSION_GRACE_MINUTES,
 ): Date {
   return new Date(slotEnd.getTime() + graceMinutes * MINUTE_MS);
-}
-
-/** When a session closed without a StopTransaction at `closedAt` is billed without the host. */
-export function hostConfirmationDueAt(closedAt: Date): Date {
-  return new Date(closedAt.getTime() + HOST_CONFIRMATION_HOURS * HOUR_MS);
 }

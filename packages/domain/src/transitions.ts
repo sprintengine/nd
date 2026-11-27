@@ -1,4 +1,4 @@
-import type { BookingStatus, PaymentStatus, SessionStatus, TransferStatus } from "./status.ts";
+import type { BookingStatus, PaymentStatus, RefundStatus, SessionStatus } from "./status.ts";
 
 // The booking and session state machines (docs/ARCHITECTURE.md, section 5) as
 // transition tables. The API and the gateway check a change against these
@@ -19,67 +19,42 @@ export const BOOKING_TRANSITIONS = {
 
 /**
  * The statuses a session may move to from each status. When StopTransaction
- * never arrives, a job closes an open session from its last meter value and
- * it waits for the host (`needs_host_confirmation`), or for support
- * (`needs_review`) when there is no meter value to close it from.
+ * never arrives, a job closes an open session from its last meter value
+ * (`reconciled`), or for support (`needs_review`) when there is no meter
+ * value to close it from. Nothing is billed from a session: the booking was
+ * paid upfront.
  */
 export const SESSION_TRANSITIONS = {
   starting: ["charging", "failed"],
-  charging: [
-    "suspended_ev",
-    "suspended_evse",
-    "stopped",
-    "needs_review",
-    "needs_host_confirmation",
-  ],
-  suspended_ev: [
-    "charging",
-    "suspended_evse",
-    "stopped",
-    "needs_review",
-    "needs_host_confirmation",
-  ],
-  suspended_evse: [
-    "charging",
-    "suspended_ev",
-    "stopped",
-    "needs_review",
-    "needs_host_confirmation",
-  ],
-  stopped: ["reconciled", "needs_review", "needs_host_confirmation"],
-  needs_host_confirmation: ["reconciled", "needs_review"],
+  charging: ["suspended_ev", "suspended_evse", "stopped", "needs_review", "reconciled"],
+  suspended_ev: ["charging", "suspended_evse", "stopped", "needs_review", "reconciled"],
+  suspended_evse: ["charging", "suspended_ev", "stopped", "needs_review", "reconciled"],
+  stopped: ["reconciled", "needs_review"],
   needs_review: ["reconciled"],
   reconciled: [],
   failed: [],
 } as const satisfies Record<SessionStatus, readonly SessionStatus[]>;
 
 /**
- * The statuses a driver's payment may move to. A slot starting soon is
- * authorised at once (`pending_authorisation` → `authorised`); a later one
- * keeps the saved card (`card_saved`) until the authorisation job. A capture
- * may be partial (a cancellation or no-show fee); the rest of the
- * authorisation is released by Stripe.
+ * The statuses a driver's payment may move to. An instant booking's charge
+ * goes `pending` → `paid`; a request's hold goes `pending` → `authorised`,
+ * then `paid` when the host approves or `cancelled` when they decline or the
+ * request expires. A refund does not change the payment's status.
  */
 export const PAYMENT_TRANSITIONS = {
-  pending_authorisation: ["authorised", "card_saved", "failed", "cancelled"],
-  card_saved: ["authorised", "failed", "cancelled"],
-  authorised: ["captured", "cancelled"],
-  captured: [],
+  pending: ["authorised", "paid", "failed", "cancelled"],
+  authorised: ["paid", "cancelled", "failed"],
+  paid: [],
   cancelled: [],
   failed: [],
 } as const satisfies Record<PaymentStatus, readonly PaymentStatus[]>;
 
-/**
- * The statuses a transfer to the host may move to. A held transfer is sent
- * once its hold reasons clear; a sent one may later be reversed.
- */
-export const TRANSFER_TRANSITIONS = {
-  pending: ["held", "sent", "failed"],
-  held: ["held", "sent", "failed"],
-  sent: ["reversed"],
-  failed: ["held", "sent"],
-  reversed: [],
-} as const satisfies Record<TransferStatus, readonly TransferStatus[]>;
+/** The statuses a refund may move to: Stripe confirms it, or it fails. */
+export const REFUND_TRANSITIONS = {
+  pending: ["succeeded", "failed"],
+  succeeded: [],
+  failed: [],
+} as const satisfies Record<RefundStatus, readonly RefundStatus[]>;
 
 /** Booking statuses a driver or host may still cancel from. Never once the driver has arrived. */
 export const CANCELLABLE_BOOKING_STATUSES = [
@@ -102,9 +77,9 @@ export function canTransitionPayment(from: PaymentStatus, to: PaymentStatus): bo
   return (PAYMENT_TRANSITIONS[from] as readonly PaymentStatus[]).includes(to);
 }
 
-/** Whether a transfer may move from `from` to `to`. */
-export function canTransitionTransfer(from: TransferStatus, to: TransferStatus): boolean {
-  return (TRANSFER_TRANSITIONS[from] as readonly TransferStatus[]).includes(to);
+/** Whether a refund may move from `from` to `to`. */
+export function canTransitionRefund(from: RefundStatus, to: RefundStatus): boolean {
+  return (REFUND_TRANSITIONS[from] as readonly RefundStatus[]).includes(to);
 }
 
 /** Whether a booking in `status` can still be cancelled. */

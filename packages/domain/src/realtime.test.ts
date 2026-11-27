@@ -15,8 +15,6 @@ const state = {
   kwh: 1.234,
   kw: 7.2,
   elapsed: 600,
-  costSoFar: 42,
-  currency: "EUR",
   lastSeenAt: "2027-01-12T22:10:00.000Z",
   startAt: "2027-01-12T22:00:00.000Z",
   stoppedAt: null,
@@ -39,7 +37,7 @@ describe("realtime contract", () => {
         failure: { code: "start_timeout", message: "x" },
       }).success,
     ).toBe(true);
-    expect(sessionStateSchema.safeParse({ ...state, costSoFar: 1.5 }).success).toBe(false);
+    expect(sessionStateSchema.safeParse({ ...state, elapsed: 1.5 }).success).toBe(false);
   });
 
   it("parses every server message", () => {

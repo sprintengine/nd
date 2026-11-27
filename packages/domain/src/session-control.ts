@@ -1,17 +1,21 @@
 import { z } from "zod";
 
-import { billedAmount, type Window } from "./pricing.ts";
+import type { Window } from "./pricing.ts";
 import { SESSION_STATUSES } from "./status.ts";
 
 // Rules for starting and stopping a charging session from the app: when the
 // driver may say they have arrived, when a start may be scheduled, how long a
 // remote start may take, and the live figures shown while charging. Pure
-// functions; the API applies them.
+// functions; the API applies them. The booking was paid upfront, so none of
+// this decides what anyone pays.
 
 const MINUTE_MS = 60_000;
 
-/** A driver may say they have arrived from this many minutes before the slot starts. */
-export const ARRIVAL_LEAD_MINUTES = 15;
+/**
+ * By default a driver may say they have arrived (and plug in) from this many
+ * minutes before the slot starts; charging then starts at the slot start.
+ */
+export const ARRIVAL_LEAD_MINUTES = 4 * 60;
 
 /** An arrival position further than this from the charger is noted (never refused). */
 export const ARRIVAL_RADIUS_M = 300;
@@ -32,19 +36,26 @@ function assertDate(name: string, value: Date): void {
   if (Number.isNaN(value.getTime())) throw new RangeError(`${name} must be a valid date`);
 }
 
-/** When the driver may first say they have arrived for a slot. */
-export function arrivalOpensAt(slotStart: Date): Date {
+/** When the driver may first say they have arrived for a slot, `leadMinutes` ahead of it. */
+export function arrivalOpensAt(slotStart: Date, leadMinutes = ARRIVAL_LEAD_MINUTES): Date {
   assertDate("slotStart", slotStart);
-  return new Date(slotStart.getTime() - ARRIVAL_LEAD_MINUTES * MINUTE_MS);
+  if (!Number.isSafeInteger(leadMinutes) || leadMinutes < 0) {
+    throw new RangeError(`leadMinutes must be a non-negative integer, got ${String(leadMinutes)}`);
+  }
+  return new Date(slotStart.getTime() - leadMinutes * MINUTE_MS);
 }
 
 /** Whether `now` is too early, inside, or past the window in which a driver may arrive. */
 export type ArrivalTiming = "early" | "open" | "ended";
 
-/** Arrival is allowed from 15 minutes before the slot starts until it ends. */
-export function arrivalTiming(slot: Window, now: Date): ArrivalTiming {
+/** Arrival is allowed from `leadMinutes` (4 hours by default) before the slot starts until it ends. */
+export function arrivalTiming(
+  slot: Window,
+  now: Date,
+  leadMinutes = ARRIVAL_LEAD_MINUTES,
+): ArrivalTiming {
   assertDate("now", now);
-  if (now.getTime() < arrivalOpensAt(slot.start).getTime()) return "early";
+  if (now.getTime() < arrivalOpensAt(slot.start, leadMinutes).getTime()) return "early";
   if (now.getTime() >= slot.end.getTime()) return "ended";
   return "open";
 }
@@ -92,18 +103,6 @@ export function startAtProblem(slot: Window, startAt: Date): string | undefined 
 }
 
 /**
- * When billing starts: the plug-in time of a scheduled start (the driver
- * occupies the slot while charging waits), otherwise StartTransaction.
- * Null until either is known.
- */
-export function billingStart(times: {
-  readonly pluggedInAt: Date | null;
-  readonly startedAt: Date | null;
-}): Date | null {
-  return times.pluggedInAt ?? times.startedAt;
-}
-
-/**
  * Why a start failed. The app shows the matching message from
  * {@link SESSION_FAILURE_MESSAGES} and offers to try again.
  */
@@ -148,8 +147,8 @@ export const liveSessionStatusSchema = z.enum(LIVE_SESSION_STATUSES);
 
 /** What the live figures are computed from. */
 export interface SessionMetricsInput {
-  /** See {@link billingStart}. */
-  readonly billingStart: Date | null;
+  /** When charging started (StartTransaction); null before it has. */
+  readonly startedAt: Date | null;
   /** The stop time of a stopped session, otherwise now. */
   readonly until: Date;
   readonly meterStartWh: number | null;
@@ -159,16 +158,13 @@ export interface SessionMetricsInput {
   readonly finalKwh: number | null;
   /** The latest power reading, in W; null when not charging. */
   readonly powerW: number | null;
-  readonly pricePerHourCents: number;
-  readonly quoteCents: number;
 }
 
-/** The live figures: energy, power, seconds billed so far and their cost in cents. */
+/** The live figures: energy, power and seconds since charging started. */
 export interface SessionMetrics {
   readonly kwh: number | null;
   readonly kw: number | null;
   readonly elapsed: number;
-  readonly costSoFar: number;
 }
 
 const round = (value: number, places: number) => {
@@ -177,9 +173,8 @@ const round = (value: number, places: number) => {
 };
 
 /**
- * Energy (kWh, 3 places), power (kW, 2 places), elapsed seconds since billing
- * started and the cost so far (`billedAmount`: rounded up to 5 minutes and
- * capped at the quote).
+ * Energy (kWh, 3 places), power (kW, 2 places) and seconds since charging
+ * started. Shown for information: the booking's price does not depend on them.
  */
 export function sessionMetrics(input: SessionMetricsInput): SessionMetrics {
   let kwh: number | null = input.finalKwh;
@@ -187,14 +182,10 @@ export function sessionMetrics(input: SessionMetricsInput): SessionMetrics {
     kwh = Math.max(0, input.latestEnergyWh - input.meterStartWh) / 1000;
   }
   const kw = input.powerW === null ? null : round(Math.max(0, input.powerW) / 1000, 2);
-  const start = input.billingStart;
-  if (start === null || input.until.getTime() <= start.getTime()) {
-    return { kwh: kwh === null ? null : round(kwh, 3), kw, elapsed: 0, costSoFar: 0 };
-  }
-  return {
-    kwh: kwh === null ? null : round(kwh, 3),
-    kw,
-    elapsed: Math.floor((input.until.getTime() - start.getTime()) / 1000),
-    costSoFar: billedAmount(start, input.until, input.pricePerHourCents, input.quoteCents),
-  };
+  const start = input.startedAt;
+  const elapsed =
+    start === null || input.until.getTime() <= start.getTime()
+      ? 0
+      : Math.floor((input.until.getTime() - start.getTime()) / 1000);
+  return { kwh: kwh === null ? null : round(kwh, 3), kw, elapsed };
 }

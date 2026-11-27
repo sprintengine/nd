@@ -1,21 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  BOOKING_STATUSES,
-  PAYMENT_STATUSES,
-  SESSION_STATUSES,
-  TRANSFER_STATUSES,
-} from "./status.ts";
+import { BOOKING_STATUSES, PAYMENT_STATUSES, REFUND_STATUSES, SESSION_STATUSES } from "./status.ts";
 import {
   BOOKING_TRANSITIONS,
   canTransitionBooking,
   canTransitionPayment,
+  canTransitionRefund,
   canTransitionSession,
-  canTransitionTransfer,
   isCancellable,
   PAYMENT_TRANSITIONS,
+  REFUND_TRANSITIONS,
   SESSION_TRANSITIONS,
-  TRANSFER_TRANSITIONS,
 } from "./transitions.ts";
 
 describe("booking transitions", () => {
@@ -58,10 +53,8 @@ describe("session transitions", () => {
     ["suspended_ev", "stopped"],
     ["stopped", "reconciled"],
     ["needs_review", "reconciled"],
-    ["charging", "needs_host_confirmation"],
-    ["suspended_ev", "needs_host_confirmation"],
-    ["needs_host_confirmation", "reconciled"],
-    ["needs_host_confirmation", "needs_review"],
+    ["charging", "reconciled"],
+    ["suspended_ev", "needs_review"],
   ] as const)("allow %s -> %s", (from, to) => {
     expect(canTransitionSession(from, to)).toBe(true);
   });
@@ -71,7 +64,7 @@ describe("session transitions", () => {
     ["stopped", "charging"],
     ["reconciled", "needs_review"],
     ["failed", "starting"],
-    ["starting", "needs_host_confirmation"],
+    ["starting", "reconciled"],
     ["needs_review", "stopped"],
   ] as const)("refuse %s -> %s", (from, to) => {
     expect(canTransitionSession(from, to)).toBe(false);
@@ -84,45 +77,43 @@ describe("payment transitions", () => {
   });
 
   it.each([
-    ["pending_authorisation", "authorised"],
-    ["pending_authorisation", "card_saved"],
-    ["card_saved", "authorised"],
-    ["card_saved", "failed"],
-    ["authorised", "captured"],
+    ["pending", "paid"],
+    ["pending", "authorised"],
+    ["pending", "failed"],
+    ["authorised", "paid"],
     ["authorised", "cancelled"],
+    ["authorised", "failed"],
   ] as const)("allow %s -> %s", (from, to) => {
     expect(canTransitionPayment(from, to)).toBe(true);
   });
 
   it.each([
-    ["captured", "cancelled"],
+    ["paid", "cancelled"],
     ["cancelled", "authorised"],
-    ["card_saved", "captured"],
-    ["failed", "authorised"],
+    ["failed", "paid"],
+    ["paid", "pending"],
   ] as const)("refuse %s -> %s", (from, to) => {
     expect(canTransitionPayment(from, to)).toBe(false);
   });
 });
 
-describe("transfer transitions", () => {
+describe("refund transitions", () => {
   it("cover every status", () => {
-    expect(Object.keys(TRANSFER_TRANSITIONS).sort()).toEqual([...TRANSFER_STATUSES].sort());
+    expect(Object.keys(REFUND_TRANSITIONS).sort()).toEqual([...REFUND_STATUSES].sort());
   });
 
   it.each([
-    ["pending", "held"],
-    ["pending", "sent"],
-    ["held", "sent"],
-    ["sent", "reversed"],
+    ["pending", "succeeded"],
+    ["pending", "failed"],
   ] as const)("allow %s -> %s", (from, to) => {
-    expect(canTransitionTransfer(from, to)).toBe(true);
+    expect(canTransitionRefund(from, to)).toBe(true);
   });
 
   it.each([
-    ["sent", "held"],
-    ["reversed", "sent"],
+    ["succeeded", "pending"],
+    ["failed", "succeeded"],
   ] as const)("refuse %s -> %s", (from, to) => {
-    expect(canTransitionTransfer(from, to)).toBe(false);
+    expect(canTransitionRefund(from, to)).toBe(false);
   });
 });
 

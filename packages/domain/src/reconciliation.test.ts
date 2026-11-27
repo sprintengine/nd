@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  checkMeter,
-  HOST_CONFIRMATION_HOURS,
-  hostConfirmationDueAt,
-  METER_TOLERANCE_WH,
-  staleSessionCloseAt,
-  whToKwh,
-} from "./reconciliation.ts";
+import { checkMeter, METER_TOLERANCE_WH, staleSessionCloseAt, whToKwh } from "./reconciliation.ts";
 
 describe("checkMeter", () => {
   it("takes the delta when the last MeterValue agrees within 0.2 kWh", () => {
@@ -58,11 +51,9 @@ describe("times and units", () => {
     expect(whToKwh(1)).toBe(0.001);
   });
 
-  it("closes a stale session 10 minutes after the slot and waits 72 hours for the host", () => {
+  it("closes a stale session 10 minutes after the slot, or after the grace given", () => {
     const end = new Date("2027-01-12T06:00:00Z");
     expect(staleSessionCloseAt(end)).toEqual(new Date("2027-01-12T06:10:00Z"));
     expect(staleSessionCloseAt(end, 1)).toEqual(new Date("2027-01-12T06:01:00Z"));
-    expect(hostConfirmationDueAt(end)).toEqual(new Date("2027-01-15T06:00:00Z"));
-    expect(HOST_CONFIRMATION_HOURS).toBe(72);
   });
 });

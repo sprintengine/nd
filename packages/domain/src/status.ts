@@ -44,7 +44,6 @@ export const SESSION_STATUSES = [
   "suspended_evse",
   "stopped",
   "needs_review",
-  "needs_host_confirmation",
   "reconciled",
   "failed",
 ] as const;
@@ -60,21 +59,13 @@ export const OPEN_SESSION_STATUSES = [
 ] as const satisfies readonly SessionStatus[];
 
 /**
- * Why a stopped session waits for a person before it is billed:
+ * Why a stopped session's energy figure needs a person to look at it:
  * `meter_mismatch` (the meter delta and the last MeterValue disagree),
- * `meter_invalid` (no usable stop reading), `missing_stop` (no
- * StopTransaction; closed from the last MeterValue), `no_authorisation` (no
- * card authorisation to capture), `capture_failed` (the capture kept failing)
- * and `host_dispute` (the host disputed a session closed without a stop).
+ * `meter_invalid` (no usable stop reading) and `missing_stop` (no
+ * StopTransaction and no meter value to close it from). The booking was paid
+ * upfront, so nothing waits on this; support may refund by hand.
  */
-export const SESSION_REVIEW_REASONS = [
-  "meter_mismatch",
-  "meter_invalid",
-  "missing_stop",
-  "no_authorisation",
-  "capture_failed",
-  "host_dispute",
-] as const;
+export const SESSION_REVIEW_REASONS = ["meter_mismatch", "meter_invalid", "missing_stop"] as const;
 export type SessionReviewReason = (typeof SESSION_REVIEW_REASONS)[number];
 export const sessionReviewReasonSchema = z.enum(SESSION_REVIEW_REASONS);
 
@@ -89,40 +80,34 @@ export type ConnectorType = (typeof CONNECTOR_TYPES)[number];
 export const connectorTypeSchema = z.enum(CONNECTOR_TYPES);
 
 /**
- * The driver's payment for a booking, charged on the platform account.
- *
- * `pending_authorisation` → `authorised` when the slot starts within the
- * authorisation horizon; otherwise `card_saved` (SetupIntent) until a job
- * authorises it before the slot. `captured` after the session is reconciled.
+ * The driver's payment for a booking: one destination charge to the host's
+ * connected account, paid upfront. `pending` while the PaymentIntent's
+ * outcome is not known; an instant booking is then `paid` (automatic
+ * capture), a request `authorised` (manual capture) until the host approves
+ * (`paid`) or declines or lets it expire (`cancelled`). `failed` when the
+ * card is declined or the hold can no longer be captured.
  */
-export const PAYMENT_STATUSES = [
-  "pending_authorisation",
-  "card_saved",
-  "authorised",
-  "captured",
-  "cancelled",
-  "failed",
-] as const;
+export const PAYMENT_STATUSES = ["pending", "authorised", "paid", "cancelled", "failed"] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 export const paymentStatusSchema = z.enum(PAYMENT_STATUSES);
 
-/**
- * The host's share, sent as a transfer to their connected account once the
- * payment is captured. `held` while a release condition is unmet.
- */
-export const TRANSFER_STATUSES = ["pending", "held", "sent", "failed", "reversed"] as const;
-export type TransferStatus = (typeof TRANSFER_STATUSES)[number];
-export const transferStatusSchema = z.enum(TRANSFER_STATUSES);
+/** A refund of a paid booking: `pending` until Stripe confirms it. */
+export const REFUND_STATUSES = ["pending", "succeeded", "failed"] as const;
+export type RefundStatus = (typeof REFUND_STATUSES)[number];
+export const refundStatusSchema = z.enum(REFUND_STATUSES);
 
-/** Why a transfer to the host is being held. */
-export const TRANSFER_HOLD_REASONS = [
-  "session_needs_review",
-  "dispute_open",
-  "tax_details_incomplete",
-  "payouts_not_enabled",
+/**
+ * Why a booking was refunded: the driver cancelled before the host's cutoff,
+ * the host cancelled, the charger let the driver down, or support decided.
+ */
+export const REFUND_REASONS = [
+  "driver_cancelled",
+  "host_cancelled",
+  "charger_fault",
+  "support",
 ] as const;
-export type TransferHoldReason = (typeof TRANSFER_HOLD_REASONS)[number];
-export const transferHoldReasonSchema = z.enum(TRANSFER_HOLD_REASONS);
+export type RefundReason = (typeof REFUND_REASONS)[number];
+export const refundReasonSchema = z.enum(REFUND_REASONS);
 
 /** State of the host's connected payments account. */
 export const HOST_PAYOUT_STATUSES = ["not_started", "pending", "enabled", "restricted"] as const;

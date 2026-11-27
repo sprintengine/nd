@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { liveSessionStatusSchema, sessionFailureReasonSchema } from "./session-control.ts";
-import { bookingStatusSchema, chargerStatusSchema, currencySchema } from "./status.ts";
+import { bookingStatusSchema, chargerStatusSchema } from "./status.ts";
 
 // The realtime contract between the API's WebSocket at /ws and the apps.
 // Messages are JSON text frames with a `type`. The server pushes changes to
@@ -27,14 +27,12 @@ export const sessionStateSchema = z
     status: liveSessionStatusSchema,
     kwh: z.number().nonnegative().nullable().describe("Energy delivered so far, in kWh"),
     kw: z.number().nonnegative().nullable().describe("Latest charging power, in kW"),
-    elapsed: z.int().nonnegative().describe("Seconds billed so far"),
-    costSoFar: z
+    elapsed: z
       .int()
       .nonnegative()
       .describe(
-        "Cost so far in cents: elapsed time rounded up to 5 minutes at the hourly price, capped at the quote",
+        "Seconds since charging started; the booking was paid upfront, so nothing is billed by time or energy",
       ),
-    currency: currencySchema,
     lastSeenAt: isoDateTime
       .nullable()
       .describe("When the charger last reported on this session; the app shows its age"),

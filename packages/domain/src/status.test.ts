@@ -30,16 +30,16 @@ import {
   OPEN_SESSION_STATUSES,
   PAYMENT_STATUSES,
   paymentStatusSchema,
+  REFUND_REASONS,
+  REFUND_STATUSES,
+  refundReasonSchema,
+  refundStatusSchema,
   SESSION_REVIEW_REASONS,
   SESSION_STATUSES,
   sessionReviewReasonSchema,
   sessionStatusSchema,
   SLOT_HOLDING_BOOKING_STATUSES,
   TERMINAL_BOOKING_STATUSES,
-  TRANSFER_HOLD_REASONS,
-  TRANSFER_STATUSES,
-  transferHoldReasonSchema,
-  transferStatusSchema,
 } from "./index.ts";
 
 const vocabularies: [string, readonly string[], z.ZodType][] = [
@@ -49,8 +49,8 @@ const vocabularies: [string, readonly string[], z.ZodType][] = [
   ["charger status", CHARGER_STATUSES, chargerStatusSchema],
   ["connector type", CONNECTOR_TYPES, connectorTypeSchema],
   ["payment status", PAYMENT_STATUSES, paymentStatusSchema],
-  ["transfer status", TRANSFER_STATUSES, transferStatusSchema],
-  ["transfer hold reason", TRANSFER_HOLD_REASONS, transferHoldReasonSchema],
+  ["refund status", REFUND_STATUSES, refundStatusSchema],
+  ["refund reason", REFUND_REASONS, refundReasonSchema],
   ["host payout status", HOST_PAYOUT_STATUSES, hostPayoutStatusSchema],
   ["cancelled by", CANCELLED_BY, cancelledBySchema],
   ["dispute status", DISPUTE_STATUSES, disputeStatusSchema],
@@ -110,11 +110,9 @@ describe("session statuses", () => {
   });
 });
 
-describe("payment and transfer statuses", () => {
-  it("model the separate charges and transfers flow", () => {
-    expect(PAYMENT_STATUSES).toEqual(
-      expect.arrayContaining(["pending_authorisation", "card_saved", "authorised", "captured"]),
-    );
-    expect(TRANSFER_STATUSES).toEqual(expect.arrayContaining(["pending", "held", "sent"]));
+describe("payment and refund statuses", () => {
+  it("model paying upfront with a destination charge", () => {
+    expect(PAYMENT_STATUSES).toEqual(["pending", "authorised", "paid", "cancelled", "failed"]);
+    expect(REFUND_STATUSES).toEqual(expect.arrayContaining(["pending", "succeeded"]));
   });
 });

@@ -1,20 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  authorisationPlan,
-  AUTHORISE_NOW_HORIZON_DAYS,
-  billableMinutes,
-  billedAmount,
-  billingBreakdown,
-  cancellationFee,
+  cancellationRefund,
   centsPerKwh,
+  chargeSplit,
+  DEFAULT_CARD_FEE_BPS,
+  DEFAULT_CARD_FEE_FIXED_CENTS,
   divideRoundHalfEven,
-  hostShare,
+  divideRoundUp,
+  hostEarnings,
   minutesCost,
   noShowAt,
-  noShowFee,
-  platformFee,
   quote,
+  requestExpiresAt,
   slotMinutes,
 } from "./pricing.ts";
 
@@ -46,22 +44,6 @@ describe("divideRoundHalfEven", () => {
     [1, 0.5],
   ])("rejects %d / %d", (numerator, denominator) => {
     expect(() => divideRoundHalfEven(numerator, denominator)).toThrow(RangeError);
-  });
-});
-
-describe("billableMinutes", () => {
-  it.each([
-    [0, 0],
-    [1, 5],
-    [5, 5],
-    [5.01, 10],
-    [219, 220],
-  ])("bills %d minutes as %d", (actual, billed) => {
-    expect(billableMinutes(actual)).toBe(billed);
-  });
-
-  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])("rejects %d", (actual) => {
-    expect(() => billableMinutes(actual)).toThrow(RangeError);
   });
 });
 
@@ -111,112 +93,197 @@ describe("quote", () => {
   });
 });
 
-describe("billedAmount", () => {
-  it("rounds the time used up to 5 minutes", () => {
-    // 62 minutes is billed as 65: 65 × 250 / 60 = 270.83…
-    expect(billedAmount(START, minutesAfter(START, 62), 250, 1000)).toBe(271);
-    expect(billedAmount(START, minutesAfter(START, 60), 250, 1000)).toBe(250);
-    expect(billedAmount(START, START, 250, 1000)).toBe(0);
+describe("divideRoundUp", () => {
+  it("rounds any remainder up", () => {
+    expect(divideRoundUp(10, 5)).toBe(2);
+    expect(divideRoundUp(11, 5)).toBe(3);
+    expect(divideRoundUp(0, 7)).toBe(0);
   });
 
-  it("never bills more than the quote", () => {
-    expect(billedAmount(START, minutesAfter(START, 300), 250, 1000)).toBe(1000);
-    expect(billedAmount(START, minutesAfter(START, 239), 250, 1000)).toBe(1000);
-  });
-
-  it("rejects a stop before the start and invalid input", () => {
-    expect(() => billedAmount(START, minutesAfter(START, -1), 250, 1000)).toThrow(RangeError);
-    expect(() => billedAmount(new Date(Number.NaN), START, 250, 1000)).toThrow(RangeError);
-    expect(() => billedAmount(START, new Date(Number.NaN), 250, 1000)).toThrow(RangeError);
-    expect(() => billedAmount(START, START, 250, -1)).toThrow(RangeError);
+  it("rejects negative, fractional or zero operands", () => {
+    expect(() => divideRoundUp(-1, 5)).toThrow(RangeError);
+    expect(() => divideRoundUp(1.5, 5)).toThrow(RangeError);
+    expect(() => divideRoundUp(1, 0)).toThrow(RangeError);
+    expect(() => divideRoundUp(1, 2.5)).toThrow(RangeError);
   });
 });
 
-describe("cancellationFee", () => {
-  const policy = { pricePerHourCents: 250, quoteCents: 1000 };
+const DEFAULT_FEES = {
+  platformFeeBps: 0,
+  cardFeeBps: DEFAULT_CARD_FEE_BPS,
+  cardFeeFixedCents: DEFAULT_CARD_FEE_FIXED_CENTS,
+};
 
-  it("is free until the default cutoff of 2 hours before the start", () => {
-    expect(cancellationFee(policy, minutesAfter(START, -121), START)).toEqual({
-      feeCents: 0,
+describe("chargeSplit", () => {
+  it("passes 1.5 % plus 25 cents on to the host by default, with no platform fee", () => {
+    expect(chargeSplit(1000, DEFAULT_FEES)).toEqual({
+      amountCents: 1000,
+      platformFeeCents: 0,
+      cardFeeCents: 40,
+      applicationFeeCents: 40,
+      hostNetCents: 960,
+    });
+  });
+
+  it("rounds the card fee up to the next cent", () => {
+    // 1.5 % of 1001 is 15.015 cents.
+    expect(chargeSplit(1001, DEFAULT_FEES)).toMatchObject({ cardFeeCents: 41, hostNetCents: 960 });
+  });
+
+  it("adds a configured platform fee, rounded up, to the application fee", () => {
+    expect(chargeSplit(1000, { ...DEFAULT_FEES, platformFeeBps: 1000 })).toEqual({
+      amountCents: 1000,
+      platformFeeCents: 100,
+      cardFeeCents: 40,
+      applicationFeeCents: 140,
+      hostNetCents: 860,
+    });
+    expect(chargeSplit(1001, { ...DEFAULT_FEES, platformFeeBps: 1 }).platformFeeCents).toBe(1);
+  });
+
+  it("never takes more than the price", () => {
+    expect(chargeSplit(20, DEFAULT_FEES)).toMatchObject({
+      cardFeeCents: 20,
+      applicationFeeCents: 20,
+      hostNetCents: 0,
+    });
+    expect(chargeSplit(100, { ...DEFAULT_FEES, platformFeeBps: 10_000 })).toMatchObject({
+      platformFeeCents: 100,
+      cardFeeCents: 0,
+      hostNetCents: 0,
+    });
+    expect(chargeSplit(0, DEFAULT_FEES).hostNetCents).toBe(0);
+  });
+
+  it("takes nothing when every fee is 0", () => {
+    expect(chargeSplit(999, { platformFeeBps: 0, cardFeeBps: 0, cardFeeFixedCents: 0 })).toEqual({
+      amountCents: 999,
+      platformFeeCents: 0,
+      cardFeeCents: 0,
+      applicationFeeCents: 0,
+      hostNetCents: 999,
+    });
+  });
+
+  it("rejects invalid amounts and settings", () => {
+    expect(() => chargeSplit(-1, DEFAULT_FEES)).toThrow(RangeError);
+    expect(() => chargeSplit(1.5, DEFAULT_FEES)).toThrow(RangeError);
+    expect(() => chargeSplit(100, { ...DEFAULT_FEES, platformFeeBps: -1 })).toThrow(RangeError);
+    expect(() => chargeSplit(100, { ...DEFAULT_FEES, cardFeeBps: 10_001 })).toThrow(RangeError);
+    expect(() => chargeSplit(100, { ...DEFAULT_FEES, cardFeeBps: 1.5 })).toThrow(RangeError);
+    expect(() => chargeSplit(100, { ...DEFAULT_FEES, cardFeeFixedCents: -1 })).toThrow(RangeError);
+  });
+});
+
+describe("hostEarnings", () => {
+  const paid = { amountCents: 1000, platformFeeCents: 0, cardFeeCents: 40 };
+
+  it("is the price less the fees when nothing was refunded", () => {
+    expect(hostEarnings(paid, 0)).toEqual({
+      grossCents: 1000,
+      platformFeeCents: 0,
+      cardFeeCents: 40,
+      netCents: 960,
+    });
+  });
+
+  it("shrinks each fee in proportion to a partial refund", () => {
+    expect(hostEarnings({ ...paid, platformFeeCents: 100 }, 250)).toEqual({
+      grossCents: 750,
+      platformFeeCents: 75,
+      cardFeeCents: 30,
+      netCents: 645,
+    });
+    // 40 × 667 / 1000 = 26.68: rounded down.
+    expect(hostEarnings(paid, 333).cardFeeCents).toBe(26);
+  });
+
+  it("is nothing after a full refund, or for a free booking", () => {
+    expect(hostEarnings(paid, 1000)).toEqual({
+      grossCents: 0,
+      platformFeeCents: 0,
+      cardFeeCents: 0,
+      netCents: 0,
+    });
+    expect(hostEarnings({ amountCents: 0, platformFeeCents: 0, cardFeeCents: 0 }, 0).netCents).toBe(
+      0,
+    );
+  });
+
+  it("rejects invalid amounts", () => {
+    expect(() => hostEarnings(paid, 1001)).toThrow(RangeError);
+    expect(() => hostEarnings(paid, -1)).toThrow(RangeError);
+    expect(() => hostEarnings({ ...paid, cardFeeCents: -1 }, 0)).toThrow(RangeError);
+    expect(() => hostEarnings({ ...paid, platformFeeCents: 0.5 }, 0)).toThrow(RangeError);
+    expect(() => hostEarnings({ ...paid, amountCents: -5 }, 0)).toThrow(RangeError);
+  });
+});
+
+describe("cancellationRefund", () => {
+  const policy = { paidCents: 1000 };
+
+  it("refunds a driver in full until the default cutoff of 2 hours before the start", () => {
+    expect(cancellationRefund(policy, "driver", minutesAfter(START, -121), START)).toEqual({
+      refundCents: 1000,
       afterCutoff: false,
     });
   });
 
-  it("charges one hour from the cutoff on", () => {
-    expect(cancellationFee(policy, minutesAfter(START, -120), START)).toEqual({
-      feeCents: 250,
+  it("refunds a driver nothing from the cutoff on", () => {
+    expect(cancellationRefund(policy, "driver", minutesAfter(START, -120), START)).toEqual({
+      refundCents: 0,
       afterCutoff: true,
     });
-    expect(cancellationFee(policy, minutesAfter(START, 30), START).feeCents).toBe(250);
+    expect(cancellationRefund(policy, "driver", minutesAfter(START, 30), START).refundCents).toBe(
+      0,
+    );
   });
 
   it("uses the host's cutoff", () => {
     const strict = { ...policy, cutoffMinutes: 24 * 60 };
-    expect(cancellationFee(strict, minutesAfter(START, -23 * 60), START).feeCents).toBe(250);
-    const lenient = { ...policy, cutoffMinutes: 0 };
-    expect(cancellationFee(lenient, minutesAfter(START, -1), START).feeCents).toBe(0);
+    expect(cancellationRefund(strict, "driver", minutesAfter(START, -600), START).refundCents).toBe(
+      0,
+    );
+    const none = { ...policy, cutoffMinutes: 0 };
+    expect(cancellationRefund(none, "driver", minutesAfter(START, -1), START).refundCents).toBe(
+      1000,
+    );
   });
 
-  it("caps the fee at the quote", () => {
-    expect(
-      cancellationFee({ pricePerHourCents: 250, quoteCents: 125 }, START, START).feeCents,
-    ).toBe(125);
+  it("always refunds in full when the host or the platform cancels", () => {
+    const late = minutesAfter(START, -5);
+    expect(cancellationRefund(policy, "host", late, START).refundCents).toBe(1000);
+    expect(cancellationRefund(policy, "system", late, START).refundCents).toBe(1000);
   });
 
   it("rejects invalid input", () => {
-    expect(() => cancellationFee({ ...policy, cutoffMinutes: -1 }, START, START)).toThrow(
+    const now = minutesAfter(START, -300);
+    expect(() =>
+      cancellationRefund({ ...policy, cutoffMinutes: -1 }, "driver", now, START),
+    ).toThrow(RangeError);
+    expect(() => cancellationRefund({ paidCents: -1 }, "driver", now, START)).toThrow(RangeError);
+    expect(() => cancellationRefund(policy, "driver", new Date(Number.NaN), START)).toThrow(
       RangeError,
     );
-    expect(() => cancellationFee({ ...policy, cutoffMinutes: 1.5 }, START, START)).toThrow(
+    expect(() => cancellationRefund(policy, "driver", now, new Date(Number.NaN))).toThrow(
       RangeError,
     );
-    expect(() => cancellationFee({ ...policy, quoteCents: -1 }, START, START)).toThrow(RangeError);
-    expect(() => cancellationFee(policy, new Date(Number.NaN), START)).toThrow(RangeError);
   });
 });
 
-describe("noShowFee", () => {
-  it("is one hour, capped at the quote", () => {
-    expect(noShowFee({ pricePerHourCents: 250, quoteCents: 1000 })).toBe(250);
-    expect(noShowFee({ pricePerHourCents: 250, quoteCents: 100 })).toBe(100);
-    expect(() => noShowFee({ pricePerHourCents: -1, quoteCents: 100 })).toThrow(RangeError);
-  });
-});
-
-describe("platformFee", () => {
-  it("defaults to nothing", () => {
-    expect(platformFee(1000)).toBe(0);
-    expect(hostShare(1000)).toBe(1000);
+describe("requestExpiresAt", () => {
+  it("gives the host 24 hours", () => {
+    const requested = at("2027-01-05T09:00:00Z");
+    expect(requestExpiresAt(requested, START)).toEqual(at("2027-01-06T09:00:00Z"));
   });
 
-  it("takes basis points, rounding half to even", () => {
-    expect(platformFee(1000, 1000)).toBe(100);
-    expect(platformFee(125, 1000)).toBe(12); // 12.5
-    expect(platformFee(135, 1000)).toBe(14); // 13.5
-    expect(hostShare(1000, 1500)).toBe(850);
-  });
-
-  it.each([-1, 10_001, 2.5])("rejects %d bps", (bps) => {
-    expect(() => platformFee(1000, bps)).toThrow(RangeError);
-  });
-});
-
-describe("authorisationPlan", () => {
-  it("authorises at once when the slot starts within 6 days", () => {
-    const now = minutesAfter(START, -AUTHORISE_NOW_HORIZON_DAYS * 24 * 60);
-    expect(authorisationPlan(now, START)).toEqual({ kind: "authorise_now" });
-  });
-
-  it("saves the card and authorises 24 hours ahead for later slots", () => {
-    const now = minutesAfter(START, -AUTHORISE_NOW_HORIZON_DAYS * 24 * 60 - 1);
-    expect(authorisationPlan(now, START)).toEqual({
-      kind: "save_card",
-      authoriseAt: at("2027-01-10T22:00:00Z"),
-    });
+  it("never runs past the slot start", () => {
+    expect(requestExpiresAt(minutesAfter(START, -60), START)).toEqual(START);
   });
 
   it("rejects invalid dates", () => {
-    expect(() => authorisationPlan(new Date(Number.NaN), START)).toThrow(RangeError);
+    expect(() => requestExpiresAt(new Date(Number.NaN), START)).toThrow(RangeError);
+    expect(() => requestExpiresAt(START, new Date(Number.NaN))).toThrow(RangeError);
   });
 });
 
@@ -224,36 +291,6 @@ describe("noShowAt", () => {
   it("is 15 minutes after the slot ends", () => {
     expect(noShowAt(START)).toEqual(at("2027-01-11T22:15:00Z"));
     expect(() => noShowAt(new Date(Number.NaN))).toThrow(RangeError);
-  });
-});
-
-describe("billingBreakdown", () => {
-  it("shows 3 h 39 min at 250 cents an hour billed as 3 h 40 min, under a 4-hour quote", () => {
-    const stop = minutesAfter(START, 219);
-    const breakdown = billingBreakdown(START, stop, 250, 1000);
-    expect(breakdown).toEqual({
-      actualMinutes: 219,
-      billedMinutes: 220,
-      timeCostCents: 917,
-      capped: false,
-      amountCents: 917,
-    });
-    expect(breakdown.amountCents).toBe(billedAmount(START, stop, 250, 1000));
-  });
-
-  it("notes when the quote caps the amount", () => {
-    const breakdown = billingBreakdown(START, minutesAfter(START, 241), 250, 1000);
-    expect(breakdown).toMatchObject({ billedMinutes: 245, timeCostCents: 1021, capped: true });
-    expect(breakdown.amountCents).toBe(1000);
-  });
-
-  it("rounds part of a minute up", () => {
-    const stop = new Date(START.getTime() + 61_000);
-    expect(billingBreakdown(START, stop, 600, 1000)).toMatchObject({
-      actualMinutes: 2,
-      billedMinutes: 5,
-      amountCents: 50,
-    });
   });
 });
 

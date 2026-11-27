@@ -5,7 +5,6 @@ import {
   arrivalCheck,
   arrivalOpensAt,
   arrivalTiming,
-  billingStart,
   distanceMeters,
   isSessionFailureReason,
   LIVE_SESSION_STATUSES,
@@ -20,16 +19,25 @@ const slot = { start: new Date("2027-01-12T22:00:00Z"), end: new Date("2027-01-1
 const at = (iso: string) => new Date(iso);
 
 describe("arrival", () => {
-  it("opens 15 minutes before the slot and closes when it ends", () => {
-    expect(arrivalOpensAt(slot.start)).toEqual(at("2027-01-12T21:45:00Z"));
-    expect(arrivalTiming(slot, at("2027-01-12T21:44:59Z"))).toBe("early");
-    expect(arrivalTiming(slot, at("2027-01-12T21:45:00Z"))).toBe("open");
+  it("opens 4 hours before the slot by default and closes when it ends", () => {
+    expect(arrivalOpensAt(slot.start)).toEqual(at("2027-01-12T18:00:00Z"));
+    expect(arrivalTiming(slot, at("2027-01-12T17:59:59Z"))).toBe("early");
+    expect(arrivalTiming(slot, at("2027-01-12T18:00:00Z"))).toBe("open");
     expect(arrivalTiming(slot, at("2027-01-13T01:59:59Z"))).toBe("open");
     expect(arrivalTiming(slot, at("2027-01-13T02:00:00Z"))).toBe("ended");
   });
 
-  it("rejects invalid dates", () => {
+  it("opens as far ahead as configured", () => {
+    expect(arrivalOpensAt(slot.start, 15)).toEqual(at("2027-01-12T21:45:00Z"));
+    expect(arrivalTiming(slot, at("2027-01-12T21:44:59Z"), 15)).toBe("early");
+    expect(arrivalTiming(slot, at("2027-01-12T21:45:00Z"), 15)).toBe("open");
+    expect(arrivalTiming(slot, at("2027-01-12T21:59:59Z"), 0)).toBe("early");
+  });
+
+  it("rejects invalid dates and leads", () => {
     expect(() => arrivalOpensAt(new Date(Number.NaN))).toThrow(RangeError);
+    expect(() => arrivalOpensAt(slot.start, -1)).toThrow(RangeError);
+    expect(() => arrivalOpensAt(slot.start, 1.5)).toThrow(RangeError);
     expect(() => arrivalTiming(slot, new Date(Number.NaN))).toThrow(RangeError);
     expect(() => windowEndStopAt(new Date(Number.NaN))).toThrow(RangeError);
   });
@@ -70,14 +78,6 @@ describe("scheduled starts and the window end", () => {
     expect(startAtProblem(slot, at("2027-01-12T21:59:00Z"))).toMatch(/inside/);
     expect(startAtProblem(slot, new Date(Number.NaN))).toMatch(/valid date/);
   });
-
-  it("bills from the plug-in of a scheduled start, otherwise from StartTransaction", () => {
-    const plugged = at("2027-01-12T22:05:00Z");
-    const started = at("2027-01-13T00:00:00Z");
-    expect(billingStart({ pluggedInAt: plugged, startedAt: started })).toBe(plugged);
-    expect(billingStart({ pluggedInAt: null, startedAt: started })).toBe(started);
-    expect(billingStart({ pluggedInAt: null, startedAt: null })).toBeNull();
-  });
 });
 
 describe("failure reasons", () => {
@@ -100,22 +100,19 @@ describe("failure reasons", () => {
 
 describe("sessionMetrics", () => {
   const base = {
-    billingStart: at("2027-01-12T22:00:00Z"),
+    startedAt: at("2027-01-12T22:00:00Z"),
     until: at("2027-01-12T22:31:30Z"),
     meterStartWh: 10_000,
     latestEnergyWh: 13_612,
     finalKwh: null,
     powerW: 7_234,
-    pricePerHourCents: 250,
-    quoteCents: 1_000,
   };
 
-  it("computes energy, power, elapsed time and the cost so far", () => {
-    // 31.5 minutes bill as 35: 35 × 250 / 60 = 145.83 → 146 cents.
-    expect(sessionMetrics(base)).toEqual({ kwh: 3.612, kw: 7.23, elapsed: 1890, costSoFar: 146 });
+  it("computes energy, power and elapsed time", () => {
+    expect(sessionMetrics(base)).toEqual({ kwh: 3.612, kw: 7.23, elapsed: 1890 });
   });
 
-  it("prefers the stored kWh of a stopped session and caps the cost at the quote", () => {
+  it("prefers the stored kWh of a stopped session", () => {
     expect(
       sessionMetrics({
         ...base,
@@ -123,17 +120,16 @@ describe("sessionMetrics", () => {
         finalKwh: 20.5,
         powerW: null,
       }),
-    ).toEqual({ kwh: 20.5, kw: null, elapsed: 28_800, costSoFar: 1_000 });
+    ).toEqual({ kwh: 20.5, kw: null, elapsed: 28_800 });
   });
 
-  it("is zero before billing starts or without readings", () => {
+  it("is zero before charging starts or without readings", () => {
     expect(
-      sessionMetrics({ ...base, billingStart: null, latestEnergyWh: null, powerW: null }),
-    ).toEqual({ kwh: null, kw: null, elapsed: 0, costSoFar: 0 });
+      sessionMetrics({ ...base, startedAt: null, latestEnergyWh: null, powerW: null }),
+    ).toEqual({ kwh: null, kw: null, elapsed: 0 });
     // A charger clock ahead of ours never produces negative time.
     expect(sessionMetrics({ ...base, until: at("2027-01-12T21:59:00Z") })).toMatchObject({
       elapsed: 0,
-      costSoFar: 0,
     });
     // A meter that went backwards reads as nothing delivered.
     expect(sessionMetrics({ ...base, latestEnergyWh: 9_000, powerW: -5 })).toMatchObject({
