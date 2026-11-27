@@ -190,7 +190,8 @@ export async function refundsAwaitingStripe(db: Executor, paymentId: string): Pr
  * Payments that stopped half way and need resuming: a charge whose outcome
  * is not known after `staleBefore`; a hold on a booking that was confirmed
  * (to capture) or cancelled (to release); a booking still holding its slot
- * with a payment that failed or was cancelled; and paid payments with a
+ * with a payment that failed or was cancelled; a paid payment of a booking
+ * the platform cancelled, not refunded yet; and paid payments with a
  * refund recorded but not sent before `staleBefore`, or sent but still
  * pending at Stripe since `refundCheckBefore`.
  */
@@ -209,6 +210,9 @@ export async function paymentsToResume(
       sql`(${payments.status} = 'pending' and ${payments.updatedAt} < ${stale})
         or (${payments.status} = 'authorised' and ${bookings.status} in ('confirmed', 'cancelled'))
         or (${payments.status} in ('failed', 'cancelled') and ${bookings.status} in ('requested', 'confirmed'))
+        or (${payments.status} = 'paid' and ${bookings.status} = 'cancelled'
+          and ${bookings.cancelledBy} = 'system' and not exists (
+            select 1 from ${refunds} r where r.payment_id = ${payments.id} and r.reason = 'system_cancelled'))
         or (${payments.status} = 'paid' and exists (
           select 1 from ${refunds} r where r.payment_id = ${payments.id} and r.status = 'pending'
             and ((r.stripe_refund_id is null and r.created_at < ${stale})

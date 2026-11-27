@@ -85,6 +85,13 @@
       "when": 1795748729999,
       "tag": "0011_refund_operation_id",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795750743656,
+      "tag": "0012_system_cancelled_refunds",
+      "breakpoints": true
     }
   ]
 }

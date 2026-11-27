@@ -64,6 +64,26 @@ describe("booking-no-show", () => {
     expect(env.payments.calls).toHaveLength(0);
   });
 
+  it("cancels, rather than marks a no-show, a booking whose payment never went through", async () => {
+    given({ payment: { status: "authorised", captureMethod: "manual" } });
+    env.clock.current = new Date(end.getTime() + 15 * 60_000);
+    await noShowJob.run({ bookingId: BOOKING_ID }, env.services, attempt);
+    expect(data.updateBookingFrom).toHaveBeenCalledWith(
+      expect.anything(),
+      BOOKING_ID,
+      ["confirmed"],
+      expect.objectContaining({
+        status: "cancelled",
+        cancelledBy: "system",
+        cancellationReason: "payment_not_completed",
+      }),
+    );
+    expect(env.jobs.sent[0]).toMatchObject({
+      name: "resume-payment",
+      payload: { paymentId: PAYMENT_ID },
+    });
+  });
+
   it("leaves bookings that were not left confirmed", async () => {
     given({ booking: { status: "completed" } });
     env.clock.current = new Date(end.getTime() + 60 * 60_000);
@@ -288,6 +308,20 @@ describe("resume-payment", () => {
       status: "failed",
       failureReason: "charge_already_refunded",
     });
+  });
+
+  it("refunds a charge that settled after the platform cancelled the booking", async () => {
+    given({ booking: { status: "cancelled", cancelledBy: "system" } });
+    await run();
+    expect(paymentData.insertRefund).toHaveBeenCalledWith(expect.anything(), {
+      paymentId: PAYMENT_ID,
+      amountCents: "remainder",
+      reason: "system_cancelled",
+    });
+    vi.mocked(paymentData.insertRefund).mockClear();
+    given({ booking: { status: "cancelled", cancelledBy: "driver" } });
+    await run();
+    expect(paymentData.insertRefund).not.toHaveBeenCalled();
   });
 
   it("sends refunds that were recorded but not sent", async () => {

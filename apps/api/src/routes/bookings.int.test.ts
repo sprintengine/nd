@@ -633,6 +633,37 @@ describe("no-show job", () => {
   });
 });
 
+describe("a booking whose payment never went through", () => {
+  it("is cancelled, not a no-show, and refunded if the charge settles later", async () => {
+    const chargerId = await listCharger();
+    const start = nightIn(14);
+    const body = await booked(chargerId, start, 2);
+    // As if Stripe was still processing the charge when the slot ended.
+    await h.database.db
+      .update(payments)
+      .set({ status: "pending" })
+      .where(eq(payments.bookingId, body.id));
+    clock.current = new Date(start.getTime() + 2 * HOUR + 16 * 60_000);
+    try {
+      await h.jobs.runNow(noShowJob, { bookingId: body.id });
+    } finally {
+      clock.current = new Date();
+    }
+    expect(await bookingRow(body.id)).toMatchObject({
+      status: "cancelled",
+      cancelledBy: "system",
+      cancellationReason: "payment_not_completed",
+    });
+    // Stripe reports the charge succeeded: resuming finds it paid and refunds it.
+    const payment = await paymentOf(body.id);
+    await h.jobs.runNow(resumePaymentJob, { paymentId: payment.id });
+    expect((await paymentOf(body.id)).status).toBe("paid");
+    expect(await refundsOf(payment.id)).toMatchObject([
+      { reason: "system_cancelled", amountCents: 500, status: "succeeded" },
+    ]);
+  });
+});
+
 describe("reading bookings", () => {
   it("shows a booking to its driver and host only, and lists them", async () => {
     const chargerId = await listCharger();

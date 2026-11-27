@@ -1511,7 +1511,13 @@
                 },
                 "reason": {
                   "type": "string",
-                  "enum": ["driver_cancelled", "host_cancelled", "charger_fault", "support"]
+                  "enum": [
+                    "driver_cancelled",
+                    "host_cancelled",
+                    "charger_fault",
+                    "support",
+                    "system_cancelled"
+                  ]
                 },
                 "status": {
                   "type": "string",
@@ -3390,7 +3396,13 @@
                 },
                 "reason": {
                   "type": "string",
-                  "enum": ["driver_cancelled", "host_cancelled", "charger_fault", "support"]
+                  "enum": [
+                    "driver_cancelled",
+                    "host_cancelled",
+                    "charger_fault",
+                    "support",
+                    "system_cancelled"
+                  ]
                 },
                 "status": {
                   "type": "string",
@@ -6917,7 +6929,13 @@
                     },
                     "reason": {
                       "type": "string",
-                      "enum": ["driver_cancelled", "host_cancelled", "charger_fault", "support"]
+                      "enum": [
+                        "driver_cancelled",
+                        "host_cancelled",
+                        "charger_fault",
+                        "support",
+                        "system_cancelled"
+                      ]
                     },
                     "status": {
                       "type": "string",

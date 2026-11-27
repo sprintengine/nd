@@ -457,13 +457,26 @@ export async function cancelBooking(
 
 /**
  * The no-show job, at slot end + 15 minutes: a booking still confirmed (the
- * driver never arrived) becomes a no-show. The driver paid upfront and is not
- * refunded.
+ * driver never arrived) becomes a no-show, and the driver, who paid upfront,
+ * is not refunded. A booking whose payment never went through is not a
+ * no-show: the platform cancels it, and resuming the payment releases the
+ * hold or refunds a charge that settles later.
  */
 export async function markNoShow(services: Services, bookingId: string): Promise<void> {
   const detail = await findBookingDetail(services.db, bookingId);
   if (detail?.booking.status !== "confirmed") return;
   if (services.clock.now().getTime() < noShowAt(detail.booking.slot.end).getTime()) return;
+  const payment = detail.payment;
+  if (payment?.status !== "paid") {
+    const cancelled = await updateBookingFrom(services.db, bookingId, ["confirmed"], {
+      status: "cancelled",
+      cancelledAt: services.clock.now(),
+      cancelledBy: "system",
+      cancellationReason: "payment_not_completed",
+    });
+    if (cancelled && payment !== null) await queueResume(services, payment.id);
+    return;
+  }
   if (await updateBookingFrom(services.db, bookingId, ["confirmed"], { status: "no_show" })) {
     services.log.info({ bookingId }, "booking marked no-show; not refunded");
   }

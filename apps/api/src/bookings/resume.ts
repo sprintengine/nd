@@ -1,5 +1,5 @@
 import { findBookingDetail, findPayment } from "../data/bookings.ts";
-import { unsentRefunds } from "../data/payments.ts";
+import { insertRefund, unsentRefunds } from "../data/payments.ts";
 import {
   captureHold,
   chargeBooking,
@@ -79,6 +79,15 @@ export async function resumePayment(services: Services, paymentId: string): Prom
     return "authorised";
   }
   if (payment.status === "paid") {
+    // The platform cancelled the booking (its payment had not gone through):
+    // a charge that settled afterwards is refunded in full.
+    if (booking.status === "cancelled" && booking.cancelledBy === "system") {
+      await insertRefund(services.db, {
+        paymentId,
+        amountCents: "remainder",
+        reason: "system_cancelled",
+      });
+    }
     await sendUnsentRefunds(services, payment);
     await checkPendingRefunds(services, payment);
     if ((await unsentRefunds(services.db, paymentId)).length > 0) {

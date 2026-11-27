@@ -98,13 +98,15 @@ export const refundStatusSchema = z.enum(REFUND_STATUSES);
 
 /**
  * Why a booking was refunded: the driver cancelled before the host's cutoff,
- * the host cancelled, the charger let the driver down, or support decided.
+ * the host cancelled, the charger let the driver down, support decided, or
+ * the platform cancelled a booking whose payment only went through later.
  */
 export const REFUND_REASONS = [
   "driver_cancelled",
   "host_cancelled",
   "charger_fault",
   "support",
+  "system_cancelled",
 ] as const;
 export type RefundReason = (typeof REFUND_REASONS)[number];
 export const refundReasonSchema = z.enum(REFUND_REASONS);
