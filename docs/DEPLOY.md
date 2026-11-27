@@ -95,7 +95,7 @@ If the zone has CAA records, they must allow `letsencrypt.org` (for ocpp.) as we
 - **ocpp.** needs no Cloudflare setting: Caddy obtains and renews a Let's Encrypt certificate for it on its own over ports 80 and 443. It is stored in the `caddy-data` volume; keep that volume across upgrades, because Let's Encrypt rate-limits re-issues.
 - **Optional, recommended: Authenticated Origin Pulls.** Turn it on under SSL/TLS → Origin Server, download Cloudflare's origin-pull CA certificate to `infra/certs/cloudflare-origin-pull-ca.pem`, and add the `client_auth` block shown in the `(cloudflare_origin)` snippet of `infra/Caddyfile`. Caddy then refuses TLS for app. and api. from anyone but Cloudflare, so the VM's IP (public anyway, through ocpp.) cannot be used to bypass the proxy.
 
-Caddy takes the client address from `CF-Connecting-IP` only for connections from Cloudflare's published IP ranges, which are listed in the Caddyfile. Refresh them if [Cloudflare's list](https://www.cloudflare.com/ips/) changes.
+Caddy takes the client address from `CF-Connecting-IP` only for connections from Cloudflare's published IP ranges, which are listed in the Caddyfile, and sends it to the API as the only `X-Forwarded-For` address (`TRUST_PROXY_HOPS=1`), so rate limits key on the driver's address rather than a shared Cloudflare edge. Refresh them if [Cloudflare's list](https://www.cloudflare.com/ips/) changes.
 
 ### WebSockets
 

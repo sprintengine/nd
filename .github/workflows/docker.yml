@@ -63,6 +63,18 @@ jobs:
             -v "$PWD/infra/Caddyfile:/etc/caddy/Caddyfile:ro" \
             -v "$RUNNER_TEMP/certs:/etc/caddy/certs:ro" \
             "$CADDY_IMAGE" sh -c 'caddy validate --config /etc/caddy/Caddyfile && caddy fmt --diff /etc/caddy/Caddyfile'
+      - name: Check Caddy sends the api only the client address
+        run: |
+          # The api trusts one proxy hop (TRUST_PROXY_HOPS=1), so X-Forwarded-For
+          # must hold the client alone, not the client plus Cloudflare's edge.
+          docker run --rm -e DOMAIN=example.com -e ACME_EMAIL=dev@example.com \
+            -v "$PWD/infra/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            "$CADDY_IMAGE" caddy adapt --config /etc/caddy/Caddyfile > "$RUNNER_TEMP/caddy.json"
+          jq -e '[.apps.http.servers[].routes[]
+                  | select(.match[0].host | index("api.example.com"))
+                  | .. | objects | select(.handler? == "reverse_proxy")
+                  | .headers.request.set["X-Forwarded-For"]]
+                 == [["{http.vars.client_ip}"]]' "$RUNNER_TEMP/caddy.json"
       - name: Shellcheck the infra scripts
         run: shellcheck --external-sources infra/*.sh
 

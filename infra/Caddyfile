@@ -54,7 +54,14 @@
 app.{$DOMAIN}, api.{$DOMAIN} {
 	import cloudflare_origin
 	encode zstd gzip
-	reverse_proxy api:3000
+	reverse_proxy api:3000 {
+		# Replace X-Forwarded-For with the one client address (from
+		# CF-Connecting-IP when the connection is from Cloudflare, see
+		# trusted_proxies). By default Caddy would append Cloudflare's edge
+		# address to it, and the api, trusting one hop, would take that shared
+		# edge address as the client: rate limits would key on Cloudflare.
+		header_up X-Forwarded-For {client_ip}
+	}
 }
 
 ocpp.{$DOMAIN} {
