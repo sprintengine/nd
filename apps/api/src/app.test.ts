@@ -86,6 +86,24 @@ describe("platform", () => {
     expect(denied.headers["access-control-allow-origin"]).toBeUndefined();
   });
 
+  it("allows every method the routes use in a preflight, PUT included", async () => {
+    const response = await app.inject({
+      method: "OPTIONS",
+      url: "/hosts/me/tax-details",
+      headers: { origin: "http://localhost:5173", "access-control-request-method": "PUT" },
+    });
+    expect(response.statusCode).toBe(204);
+    const allowed = String(response.headers["access-control-allow-methods"])
+      .split(",")
+      .map((method) => method.trim());
+    const used = new Set(
+      Object.values(app.swagger().paths as Record<string, Record<string, unknown>>).flatMap(
+        (operations) => Object.keys(operations).map((method) => method.toUpperCase()),
+      ),
+    );
+    for (const method of used) expect(allowed).toContain(method);
+  });
+
   it("answers unknown routes with a problem", async () => {
     const response = await app.inject({ method: "GET", url: "/nope" });
     expect(response.statusCode).toBe(404);

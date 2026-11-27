@@ -134,7 +134,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   void app.register(cors, {
     origin: [...config.corsOrigins],
     credentials: true,
-    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    // Every method a route uses (PUT: tax details), or browsers refuse it after the preflight.
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     exposedHeaders: ["x-request-id", "retry-after"],
   });
   void app.register(rateLimit, {
