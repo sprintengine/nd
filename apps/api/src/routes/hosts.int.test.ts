@@ -3,6 +3,7 @@ import {
   chargers,
   findChargerCredentials,
   hosts,
+  users,
   verifyChargerSecret,
 } from "@nd/db";
 import { eq, sql } from "drizzle-orm";
@@ -184,6 +185,29 @@ describe("POST /hosts/chargers", () => {
     const taken = await call("POST", "/hosts/chargers", other, { ...charger, serial: "21239999" });
     expect(taken.statusCode).toBe(409);
     expect(taken.json()).toMatchObject({ code: "charger-registered" });
+  });
+});
+
+describe("a charger of a deleted host", () => {
+  it("can be registered by its next owner", async () => {
+    const previous = await h.user("fionn@example.com", "+353861230007");
+    const { hostId } = await becomeHost(previous);
+    const old = await connect(previous, "21230707");
+    await setOnline(old.chargerId);
+    // What account deletion leaves: the user anonymised, the charger kept as a tombstone.
+    const [owner] = await h.database.db
+      .select({ userId: hosts.userId })
+      .from(hosts)
+      .where(eq(hosts.id, hostId));
+    await h.database.db
+      .update(users)
+      .set({ deletedAt: new Date() })
+      .where(eq(users.id, owner?.userId ?? ""));
+
+    const next = await h.user("aisling@example.com", "+353861230008");
+    await becomeHost(next);
+    const created = await connect(next, "21230707");
+    expect(created.chargerId).not.toBe(old.chargerId);
   });
 });
 

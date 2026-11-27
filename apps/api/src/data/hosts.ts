@@ -6,9 +6,10 @@ import {
   findHostByUserId,
   type Host,
   hosts,
+  users,
 } from "@nd/db";
 import type { Currency, HostPayoutStatus } from "@nd/domain";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 
 // Reads and writes behind the /hosts routes. Integration tests cover them
 // against Postgres. Ordinary reads never select `ocpp_auth_hash`.
@@ -48,7 +49,11 @@ export async function saveStripeAccount(
     );
 }
 
-/** Chargers registered with a serial number, by any host. */
+/**
+ * Chargers registered with a serial number, by any host whose account still
+ * exists. A deleted host's charger stays as a tombstone (it can no longer
+ * connect), so it does not stop the charger's next owner registering it.
+ */
 export function chargersWithSerial(db: Executor, serial: string) {
   return db
     .select({
@@ -58,7 +63,9 @@ export function chargersWithSerial(db: Executor, serial: string) {
       chargeboxId: chargers.chargeboxId,
     })
     .from(chargers)
-    .where(eq(chargers.serial, serial));
+    .innerJoin(hosts, eq(hosts.id, chargers.hostId))
+    .innerJoin(users, eq(users.id, hosts.userId))
+    .where(and(eq(chargers.serial, serial), isNull(users.deletedAt)));
 }
 
 export interface ChargerDetails {
