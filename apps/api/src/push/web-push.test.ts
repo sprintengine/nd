@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { PushDevice } from "./push.ts";
-import { webPushPayload, webPushSender } from "./web-push.ts";
+import { isWebPushEndpoint, webPushPayload, webPushSender } from "./web-push.ts";
 
 const vapid = { subject: "mailto:dev@example.com", publicKey: "pub", privateKey: "priv" };
 const message = {
@@ -12,7 +12,7 @@ const message = {
 const device = (id: string, keys = true): PushDevice => ({
   id,
   platform: "web",
-  token: `https://push.example.com/${id}`,
+  token: `https://fcm.googleapis.com/fcm/send/${id}`,
   webPush: keys ? { p256dh: "p256", auth: "auth" } : null,
 });
 
@@ -23,7 +23,7 @@ describe("webPushSender", () => {
       { status: "sent" },
     ]);
     expect(send).toHaveBeenCalledWith(
-      { endpoint: "https://push.example.com/a", keys: { p256dh: "p256", auth: "auth" } },
+      { endpoint: "https://fcm.googleapis.com/fcm/send/a", keys: { p256dh: "p256", auth: "auth" } },
       webPushPayload(message),
       {
         vapidDetails: { subject: vapid.subject, publicKey: "pub", privateKey: "priv" },
@@ -56,11 +56,45 @@ describe("webPushSender", () => {
     ]);
   });
 
+  it("never sends to an endpoint off the browser push services, and drops it", async () => {
+    const send = vi.fn();
+    const stored = { ...device("a"), token: "https://169.254.169.254/latest/meta-data" };
+    expect(await webPushSender(vapid, send).send([stored], message)).toEqual([
+      { status: "invalid_token" },
+    ]);
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("does not send to a subscription without keys", async () => {
     const send = vi.fn();
     expect(await webPushSender(vapid, send).send([device("a", false)], message)).toEqual([
       { status: "failed", retryable: false, reason: "subscription has no keys" },
     ]);
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("isWebPushEndpoint", () => {
+  it.each([
+    "https://fcm.googleapis.com/fcm/send/abc:def",
+    "https://updates.push.services.mozilla.com/wpush/v2/abc",
+    "https://wns2-db5p.notify.windows.com/w/?token=abc",
+    "https://web.push.apple.com/QGx3ZA",
+  ])("accepts %s", (endpoint) => {
+    expect(isWebPushEndpoint(endpoint)).toBe(true);
+  });
+
+  it.each([
+    "http://fcm.googleapis.com/fcm/send/abc",
+    "https://fcm.googleapis.com:8443/fcm/send/abc",
+    "https://user:pass@fcm.googleapis.com/fcm/send/abc",
+    "https://fcm.googleapis.com.example.com/x",
+    "https://evilnotify.windows.com/x",
+    "https://push.example.com/x",
+    "https://127.0.0.1/x",
+    "https://localhost/x",
+    "not a url",
+  ])("refuses %s", (endpoint) => {
+    expect(isWebPushEndpoint(endpoint)).toBe(false);
   });
 });

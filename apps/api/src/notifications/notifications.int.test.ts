@@ -51,7 +51,7 @@ let charger: { chargerId: string; chargeboxId: string; secret: string };
 
 const HOST_TOKEN = "fcm-host-token-0001";
 const WEB_SUBSCRIPTION = {
-  endpoint: "https://push.example.com/send/driver-subscription-0001",
+  endpoint: "https://fcm.googleapis.com/fcm/send/driver-subscription-0001",
   keys: { p256dh: Buffer.alloc(65, 4).toString("base64url"), auth: "c2VjcmV0LWF1dGgtMTY" },
 };
 

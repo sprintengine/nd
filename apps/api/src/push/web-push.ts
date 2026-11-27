@@ -26,6 +26,32 @@ export type WebPushSend = (
   },
 ) => Promise<unknown>;
 
+/**
+ * Hosts of the browsers' push services: Chromium browsers (FCM), Firefox
+ * (autopush), Edge on Windows (WNS) and Safari (Apple). A subscription
+ * elsewhere is refused, so the API never POSTs to an address a client chose.
+ */
+const WEB_PUSH_HOSTS = ["fcm.googleapis.com", "updates.push.services.mozilla.com"] as const;
+const WEB_PUSH_HOST_SUFFIXES = [".notify.windows.com", ".push.apple.com"] as const;
+
+/** Whether `endpoint` is an https URL on a known browser push service, on the default port. */
+export function isWebPushEndpoint(endpoint: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:" || url.port !== "" || url.username !== "" || url.password !== "") {
+    return false;
+  }
+  const host = url.hostname;
+  return (
+    (WEB_PUSH_HOSTS as readonly string[]).includes(host) ||
+    WEB_PUSH_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))
+  );
+}
+
 /** A push waits this long for an offline browser before the service drops it. */
 const TTL_SECONDS = 24 * 3600;
 const TIMEOUT_MS = 10_000;
@@ -68,6 +94,8 @@ export function webPushSender(
     if (device.webPush === null) {
       return { status: "failed", retryable: false, reason: "subscription has no keys" };
     }
+    // Stored before endpoints were checked: never contacted, and removed like an expired one.
+    if (!isWebPushEndpoint(device.token)) return { status: "invalid_token" };
     try {
       await send({ endpoint: device.token, keys: device.webPush }, payload, options);
       return { status: "sent" };

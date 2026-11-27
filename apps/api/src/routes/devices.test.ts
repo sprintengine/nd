@@ -54,7 +54,7 @@ describe("POST /me/devices", () => {
       createdAt: NOW,
     });
     const subscription = {
-      endpoint: "https://push.example.com/send/abc",
+      endpoint: "https://fcm.googleapis.com/fcm/send/abc",
       keys: {
         p256dh:
           "BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM",
@@ -83,9 +83,14 @@ describe("POST /me/devices", () => {
       {
         platform: "web",
         subscription: {
-          endpoint: "https://push.example.com/x",
+          endpoint: "https://fcm.googleapis.com/fcm/send/x",
           keys: { p256dh: "a+b", auth: "b" },
         },
+      },
+      // Not a browser push service: the server would otherwise POST wherever the client says.
+      {
+        platform: "web",
+        subscription: { endpoint: "https://10.0.0.5/admin", keys: { p256dh: "a", auth: "b" } },
       },
     ]) {
       expect((await send("POST", "/me/devices", body)).statusCode).toBe(400);

@@ -4512,7 +4512,8 @@
                           "endpoint": {
                             "type": "string",
                             "maxLength": 2048,
-                            "format": "uri"
+                            "format": "uri",
+                            "description": "On a browser push service: fcm.googleapis.com, updates.push.services.mozilla.com, *.notify.windows.com or *.push.apple.com"
                           },
                           "keys": {
                             "type": "object",

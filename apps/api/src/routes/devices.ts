@@ -11,6 +11,7 @@ import {
   savePreferences,
 } from "../data/notifications.ts";
 import { HttpProblem, problemResponses } from "../http/problem.ts";
+import { isWebPushEndpoint } from "../push/web-push.ts";
 import type { Services } from "../services.ts";
 
 /** A base64url value, as browsers give a push subscription's keys. */
@@ -35,7 +36,13 @@ const webDevice = z.object({
   platform: z.literal("web"),
   subscription: z
     .object({
-      endpoint: z.url({ protocol: /^https$/ }).max(2048),
+      endpoint: z
+        .url({ protocol: /^https$/ })
+        .max(2048)
+        .refine(isWebPushEndpoint, "must be on a browser push service")
+        .describe(
+          "On a browser push service: fcm.googleapis.com, updates.push.services.mozilla.com, *.notify.windows.com or *.push.apple.com",
+        ),
       keys: z.object({ p256dh: base64Url(256), auth: base64Url(64) }),
     })
     .describe("The browser's PushSubscription, as `subscription.toJSON()` gives it"),
