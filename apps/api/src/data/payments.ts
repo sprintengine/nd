@@ -15,16 +15,17 @@ const LIVE_REFUND = ne(refunds.status, "failed");
 
 /**
  * Records a refund to send, unless it would take more than was paid. The
- * payment row is locked, so two refunds cannot both pass the check. An
- * automatic reason is recorded at most once per payment: asking again
- * returns the refund already recorded. Resolves to undefined when the amount
- * is more than what is left to refund.
+ * payment row is locked, so two refunds cannot both pass the check.
+ * `"remainder"` refunds whatever is left (after earlier refunds, pending ones
+ * included), and records nothing when nothing is. An automatic reason is
+ * recorded at most once per payment: asking again returns the refund already
+ * recorded. Resolves to undefined when the amount is more than is left.
  */
 export function insertRefund(
   db: Executor,
   input: {
     readonly paymentId: string;
-    readonly amountCents: number;
+    readonly amountCents: number | "remainder";
     readonly reason: RefundReason;
     readonly issuedById?: string;
     readonly note?: string;
@@ -45,13 +46,14 @@ export function insertRefund(
         .limit(1);
       if (existing !== undefined) return existing;
     }
-    const refunded = await refundedCents(tx, input.paymentId);
-    if (input.amountCents > payment.amountCents - refunded) return undefined;
+    const left = payment.amountCents - (await refundedCents(tx, input.paymentId));
+    const amountCents = input.amountCents === "remainder" ? left : input.amountCents;
+    if (amountCents <= 0 || amountCents > left) return undefined;
     const [row] = await tx
       .insert(refunds)
       .values({
         paymentId: input.paymentId,
-        amountCents: input.amountCents,
+        amountCents,
         currency: payment.currency,
         reason: input.reason,
         issuedById: input.issuedById ?? null,
@@ -74,7 +76,8 @@ export function updateBookingWithRefund(
   bookingId: string,
   from: readonly BookingStatus[],
   change: BookingChange,
-  refund: { paymentId: string; amountCents: number; reason: RefundReason } | undefined,
+  refund:
+    { paymentId: string; amountCents: number | "remainder"; reason: RefundReason } | undefined,
 ): Promise<{ changed: boolean; refund: Refund | undefined }> {
   return db.transaction(async (tx) => {
     if (!(await updateBookingFrom(tx, bookingId, from, change))) {

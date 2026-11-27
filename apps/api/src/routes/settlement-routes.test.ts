@@ -258,7 +258,7 @@ describe("POST /admin/bookings/:id/refund", () => {
     vi.mocked(paymentData.insertRefund).mockImplementation((_db, input) =>
       Promise.resolve(
         refundRow({
-          amountCents: input.amountCents,
+          amountCents: input.amountCents === "remainder" ? 1000 : input.amountCents,
           reason: input.reason,
           status: "pending",
           stripeRefundId: null,

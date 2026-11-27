@@ -43,7 +43,7 @@ export async function closeArrivedBooking(
     ["arrived"],
     { status: "completed" },
     payment?.status === "paid"
-      ? { paymentId: payment.id, amountCents: payment.amountCents, reason: "charger_fault" }
+      ? { paymentId: payment.id, amountCents: "remainder", reason: "charger_fault" }
       : undefined,
   );
   if (!changed) return "skipped";

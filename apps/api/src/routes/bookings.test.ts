@@ -92,6 +92,8 @@ beforeEach(() => {
             ? undefined
             : {
                 ...refund,
+                // The payment fixture is 1000 cents, nothing refunded yet.
+                amountCents: refund.amountCents === "remainder" ? 1000 : refund.amountCents,
                 id: "refund-1",
                 currency: "EUR",
                 status: "pending",
@@ -613,7 +615,7 @@ describe("POST /bookings/:id/cancel", () => {
         cancelledBy: "driver",
         cancellationReason: "cancelled_by_driver",
       }),
-      { paymentId: PAYMENT_ID, amountCents: 1000, reason: "driver_cancelled" },
+      { paymentId: PAYMENT_ID, amountCents: "remainder", reason: "driver_cancelled" },
     );
     expect(payments.callsTo("refund")[0]?.input).toEqual({
       paymentIntentId: "pi_1",
@@ -650,7 +652,7 @@ describe("POST /bookings/:id/cancel", () => {
     await send("POST", `/bookings/${BOOKING_ID}/cancel`);
     expect(vi.mocked(paymentData.updateBookingWithRefund).mock.calls[0]?.[4]).toEqual({
       paymentId: PAYMENT_ID,
-      amountCents: 1000,
+      amountCents: "remainder",
       reason: "host_cancelled",
     });
   });

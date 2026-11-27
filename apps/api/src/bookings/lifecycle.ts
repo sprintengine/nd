@@ -442,8 +442,9 @@ export async function cancelBooking(
     refundCents === 0
       ? undefined
       : {
+          // Everything paid, less any earlier (support) refund.
           paymentId: payment.id,
-          amountCents: refundCents,
+          amountCents: "remainder",
           reason: role === "driver" ? "driver_cancelled" : "host_cancelled",
         },
   );

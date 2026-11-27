@@ -474,6 +474,27 @@ describe("cancellation", () => {
     ]);
   });
 
+  it("refunds only what is left after an earlier support refund", async () => {
+    const chargerId = await listCharger();
+    const body = await booked(chargerId, nightIn(6), 4);
+    const payment = await paymentOf(body.id);
+    await h.database.db.insert(refunds).values({
+      paymentId: payment.id,
+      amountCents: 300,
+      currency: "EUR",
+      reason: "support",
+      status: "succeeded",
+    });
+    const response = await call("POST", `/bookings/${body.id}/cancel`, driver, {});
+    expect(response.statusCode, response.body).toBe(200);
+    expect(await refundsOf(payment.id)).toMatchObject(
+      expect.arrayContaining([
+        expect.objectContaining({ reason: "support", amountCents: 300 }),
+        expect.objectContaining({ reason: "driver_cancelled", amountCents: 700 }),
+      ]),
+    );
+  });
+
   it("is refused once the driver has arrived, and to strangers", async () => {
     const chargerId = await listCharger();
     const body = await booked(chargerId, nightIn(5), 2);

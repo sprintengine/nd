@@ -28,7 +28,8 @@ export async function chargerEndedSession(
 }
 
 /**
- * Records and sends a full charger-fault refund of the booking's payment.
+ * Records and sends a charger-fault refund of whatever is left of the
+ * booking's payment.
  * Safe to repeat: one charger-fault refund is recorded per payment.
  */
 export async function refundChargerFault(
@@ -39,7 +40,7 @@ export async function refundChargerFault(
   if (payment?.status !== "paid") return;
   const refund = await insertRefund(services.db, {
     paymentId: payment.id,
-    amountCents: payment.amountCents,
+    amountCents: "remainder",
     reason: "charger_fault",
   });
   if (refund === undefined) return;

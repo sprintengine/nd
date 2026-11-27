@@ -81,7 +81,7 @@ describe("closeArrivedBooking", () => {
       BOOKING_ID,
       ["arrived"],
       { status: "completed" },
-      { paymentId: PAYMENT_ID, amountCents: 1000, reason: "charger_fault" },
+      { paymentId: PAYMENT_ID, amountCents: "remainder", reason: "charger_fault" },
     );
     expect(env.payments.callsTo("refund")[0]?.input).toMatchObject({
       amountCents: 1000,
