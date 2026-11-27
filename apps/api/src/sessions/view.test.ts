@@ -18,8 +18,6 @@ describe("sessionState", () => {
       kwh: null,
       kw: null,
       elapsed: 0,
-      costSoFar: 0,
-      currency: "EUR",
       lastSeenAt: null,
       startAt: null,
       stoppedAt: null,
@@ -47,8 +45,6 @@ describe("sessionState", () => {
       kwh: 0.84,
       kw: 7.1,
       elapsed: 480,
-      // 8 minutes bill as 10: 10 × 250 / 60 = 41.7 → 42 cents.
-      costSoFar: 42,
       lastSeenAt: "2027-01-12T22:09:00.000Z",
       startAt: "2027-01-12T22:02:00.000Z",
     });
@@ -75,14 +71,13 @@ describe("sessionState", () => {
       kwh: 5.5,
       kw: null,
       elapsed: 3600,
-      costSoFar: 250,
       lastSeenAt: "2027-01-12T23:00:00.000Z",
       stoppedAt: "2027-01-12T23:00:00.000Z",
       stopReason: "EVDisconnected",
     });
   });
 
-  it("explains a failed start, and shows no cost for it", () => {
+  it("explains a failed start", () => {
     expect(
       sessionState(
         sessionContext({ session: { status: "failed", stopReason: "start_timeout" } }),
@@ -90,7 +85,7 @@ describe("sessionState", () => {
       ),
     ).toMatchObject({
       status: "failed",
-      costSoFar: 0,
+      elapsed: 0,
       stopReason: null,
       failure: {
         code: "start_timeout",
@@ -103,7 +98,7 @@ describe("sessionState", () => {
     ).toBeNull();
   });
 
-  it("bills a scheduled start from the plug-in while it waits", () => {
+  it("shows a scheduled start waiting, with nothing counted until charging starts", () => {
     const context = sessionContext({
       booking: scheduled,
       session: { status: "failed", stopReason: "rejected" },
@@ -118,8 +113,7 @@ describe("sessionState", () => {
       status: "scheduled",
       sessionId: null,
       startAt: "2027-01-13T00:00:00.000Z",
-      elapsed: 540,
-      costSoFar: 42,
+      elapsed: 0,
       failure: null,
       lastSeenAt: null,
     });

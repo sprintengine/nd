@@ -130,9 +130,16 @@ describe("arrive", () => {
     expect((await problem(arrive(t.services, DRIVER_ID, BOOKING_ID, undefined)))?.code).toBe(
       "cannot-arrive",
     );
-    confirmed(new Date("2027-01-12T21:44:00Z"));
+    // Four hours ahead by default: the driver may plug in before the night-rate slot.
+    confirmed(new Date("2027-01-12T17:59:00Z"));
     const early = await problem(arrive(t.services, DRIVER_ID, BOOKING_ID, undefined));
-    expect(early).toMatchObject({ status: 409, code: "too-early" });
+    expect(early).toMatchObject({
+      status: 409,
+      code: "too-early",
+      detail: "You can check in from 240 minutes before your slot starts.",
+    });
+    confirmed(new Date("2027-01-12T18:00:00Z"));
+    await expect(arrive(t.services, DRIVER_ID, BOOKING_ID, undefined)).resolves.toBeDefined();
     confirmed(new Date("2027-01-13T02:00:00Z"));
     expect((await problem(arrive(t.services, DRIVER_ID, BOOKING_ID, undefined)))?.code).toBe(
       "slot-ended",
@@ -142,6 +149,28 @@ describe("arrive", () => {
     expect((await problem(arrive(t.services, DRIVER_ID, BOOKING_ID, undefined)))?.code).toBe(
       "cannot-arrive",
     );
+  });
+});
+
+describe("an unpaid booking", () => {
+  it("cannot be checked in at or charged", async () => {
+    t.clock.current = new Date("2027-01-12T21:50:00Z");
+    vi.mocked(data.findSessionContext).mockResolvedValue(
+      sessionContext({
+        booking: { status: "confirmed", arrivedAt: null },
+        paymentStatus: "authorised",
+      }),
+    );
+    expect(await problem(arrive(t.services, DRIVER_ID, BOOKING_ID, undefined))).toMatchObject({
+      status: 409,
+      code: "payment-pending",
+    });
+    vi.mocked(data.findSessionContext).mockResolvedValue(sessionContext({ paymentStatus: null }));
+    expect((await problem(startCharging(t.services, DRIVER_ID, BOOKING_ID, undefined)))?.code).toBe(
+      "payment-pending",
+    );
+    expect(data.recordArrival).not.toHaveBeenCalled();
+    expect(t.control.calls).toEqual([]);
   });
 });
 
@@ -204,13 +233,27 @@ describe("startCharging", () => {
     expect((await problem(startCharging(t.services, DRIVER_ID, BOOKING_ID, undefined)))?.code).toBe(
       "slot-ended",
     );
-    t.clock.current = new Date("2027-01-12T21:50:00Z");
-    expect((await problem(startCharging(t.services, DRIVER_ID, BOOKING_ID, undefined)))?.code).toBe(
-      "slot-not-started",
-    );
+    t.clock.current = IN_SLOT;
     expect(await problem(startCharging(t.services, DRIVER_ID, BOOKING_ID, late))).toMatchObject({
       status: 422,
       code: "invalid-start-time",
+    });
+    expect(t.control.calls).toEqual([]);
+  });
+
+  it("starts charging at the slot start for a driver who plugged in early", async () => {
+    const early = new Date("2027-01-12T20:30:00Z");
+    t.clock.current = early;
+    await startCharging(t.services, DRIVER_ID, BOOKING_ID, undefined);
+    const slotStart = new Date("2027-01-12T22:00:00Z");
+    expect(data.setScheduledStart).toHaveBeenCalledWith(expect.anything(), BOOKING_ID, {
+      scheduledStartAt: slotStart,
+      pluggedInAt: early,
+    });
+    expect(t.jobs.sent[0]).toEqual({
+      name: "session-remote-start",
+      payload: { bookingId: BOOKING_ID },
+      options: { startAfter: slotStart, singletonKey: `${BOOKING_ID}-scheduled` },
     });
     expect(t.control.calls).toEqual([]);
   });

@@ -151,7 +151,7 @@ describe("OpenAPI", () => {
     const spec = response.json<{ openapi: string; paths: Record<string, unknown> }>();
     expect(spec.openapi).toBe("3.1.0");
     expect(Object.keys(spec.paths).sort()).toEqual([
-      "/admin/sessions/{id}/resolve",
+      "/admin/bookings/{id}/refund",
       "/bookings",
       "/bookings/{id}",
       "/bookings/{id}/approve",
@@ -175,8 +175,6 @@ describe("OpenAPI", () => {
       "/hosts/chargers/{id}/stop",
       "/hosts/dashboard",
       "/hosts/me/tax-details",
-      "/hosts/sessions/{id}/confirm",
-      "/hosts/sessions/{id}/dispute",
       "/me",
       "/me/delete",
       "/me/delete/cancel",

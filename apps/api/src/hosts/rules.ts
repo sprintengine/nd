@@ -64,7 +64,11 @@ export function newChargeboxId(): string {
 /** One unmet condition for publishing a listing. */
 export interface PublishBlocker {
   readonly code:
-    "charger-not-online" | "firmware-too-old" | "payouts-not-enabled" | "no-availability";
+    | "charger-not-online"
+    | "firmware-too-old"
+    | "payouts-not-enabled"
+    | "tax-details-missing"
+    | "no-availability";
   readonly message: string;
 }
 
@@ -73,6 +77,7 @@ export function publishBlockers(input: {
   readonly status: ChargerStatus;
   readonly firmware: string | null;
   readonly payoutStatus: HostPayoutStatus;
+  readonly taxDetailsComplete: boolean;
   readonly availabilityCount: number;
 }): PublishBlocker[] {
   const blockers: PublishBlocker[] = [];
@@ -95,6 +100,12 @@ export function publishBlockers(input: {
     blockers.push({
       code: "payouts-not-enabled",
       message: "Finish setting up payouts with Stripe first.",
+    });
+  }
+  if (!input.taxDetailsComplete) {
+    blockers.push({
+      code: "tax-details-missing",
+      message: "Add your tax details first: platform reporting needs them.",
     });
   }
   if (input.availabilityCount === 0) {

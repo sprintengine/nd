@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { AddressInfo } from "node:net";
 
-import { bookings, chargers, meterValues, sessions, users } from "@nd/db";
+import { bookings, chargers, meterValues, payments, sessions, users } from "@nd/db";
 import { type ChargerControl, createChargerControlClient, quote } from "@nd/domain";
 import { startZappiSim, type ZappiSim } from "@nd/ocpp-core/sim";
 import { type Gateway, startGateway } from "@nd/ocpp-gateway/app";
@@ -78,6 +78,9 @@ async function newBooking(): Promise<{ id: string; idTag: string }> {
     })
     .returning({ id: bookings.id });
   if (row === undefined) throw new Error("no booking");
+  await h.database.db
+    .insert(payments)
+    .values({ bookingId: row.id, amountCents: quote(slot, 250), status: "paid" });
   return { id: row.id, idTag };
 }
 

@@ -120,7 +120,7 @@ describe("session routes", () => {
   it("serves the live session and passes problems through", async () => {
     expect((await send("GET", `/bookings/${BOOKING_ID}/session`)).json()).toMatchObject({
       status: "not_started",
-      currency: "EUR",
+      elapsed: 0,
     });
     vi.mocked(control.stopCharging).mockRejectedValue(
       new HttpProblem(503, "charger-unreachable", "The charger didn't respond"),

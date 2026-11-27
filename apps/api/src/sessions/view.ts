@@ -1,5 +1,4 @@
 import {
-  billingStart,
   isOpenSession,
   isSessionFailureReason,
   type LiveSessionStatus,
@@ -39,16 +38,12 @@ export function sessionState(context: SessionContext, now: Date): SessionState {
   const counting = status !== "not_started" && status !== "failed";
   const charging = session !== null && isOpenSession(session.status) && !pending;
   const metrics = sessionMetrics({
-    billingStart: counting
-      ? billingStart({ pluggedInAt: booking.pluggedInAt, startedAt: session?.startedAt ?? null })
-      : null,
+    startedAt: counting && !pending ? (session?.startedAt ?? null) : null,
     until: (!pending ? session?.stoppedAt : null) ?? now,
     meterStartWh: session?.meterStartWh ?? null,
     latestEnergyWh: pending ? null : (meter?.energyWh ?? null),
     finalKwh: pending ? null : (session?.kwh ?? null),
     powerW: charging ? (meter?.powerW ?? null) : null,
-    pricePerHourCents: booking.pricePerHourCents ?? 0,
-    quoteCents: booking.quotedAmountCents,
   });
   const reason = session?.stopReason ?? null;
   const failed = status === "failed";
@@ -57,7 +52,6 @@ export function sessionState(context: SessionContext, now: Date): SessionState {
     sessionId: pending ? null : (session?.id ?? null),
     status,
     ...metrics,
-    currency: booking.currency,
     lastSeenAt: pending
       ? null
       : (latest([meter?.ts, session?.startedAt, session?.stoppedAt])?.toISOString() ?? null),

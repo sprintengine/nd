@@ -5,6 +5,7 @@ import {
   hosts,
   meterValues,
   ocppMessages,
+  payments,
   sessions,
 } from "@nd/db";
 import { OPEN_SESSION_STATUSES, type SessionStatus } from "@nd/domain";
@@ -16,7 +17,8 @@ import { and, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 
 /**
  * A booking with what session control needs: its charger, the host's user,
- * the latest session and that session's latest meter readings.
+ * whether it is paid, the latest session and that session's latest meter
+ * readings.
  */
 export async function findSessionContext(db: Executor, bookingId: string) {
   const [row] = await db
@@ -28,10 +30,12 @@ export async function findSessionContext(db: Executor, bookingId: string) {
         location: chargers.location,
       },
       hostUserId: hosts.userId,
+      paymentStatus: payments.status,
     })
     .from(bookings)
     .innerJoin(chargers, eq(chargers.id, bookings.chargerId))
     .innerJoin(hosts, eq(hosts.id, chargers.hostId))
+    .leftJoin(payments, eq(payments.bookingId, bookings.id))
     .where(eq(bookings.id, bookingId))
     .limit(1);
   if (row === undefined) return undefined;

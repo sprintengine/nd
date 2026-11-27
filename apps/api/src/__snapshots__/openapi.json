@@ -50,7 +50,6 @@
               "suspended_evse",
               "stopped",
               "needs_review",
-              "needs_host_confirmation",
               "reconciled",
               "failed"
             ]
@@ -83,17 +82,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991,
-            "description": "Seconds billed so far"
-          },
-          "costSoFar": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991,
-            "description": "Cost so far in cents: elapsed time rounded up to 5 minutes at the hourly price, capped at the quote"
-          },
-          "currency": {
-            "type": "string",
-            "enum": ["EUR", "GBP"]
+            "description": "Seconds since charging started; the booking was paid upfront, so nothing is billed by time or energy"
           },
           "lastSeenAt": {
             "anyOf": [
@@ -174,8 +163,6 @@
           "kwh",
           "kw",
           "elapsed",
-          "costSoFar",
-          "currency",
           "lastSeenAt",
           "startAt",
           "stoppedAt",
@@ -303,7 +290,7 @@
             "type": "integer",
             "minimum": -9007199254740991,
             "maximum": 9007199254740991,
-            "description": "The most the driver can be charged"
+            "description": "The booking's price, paid upfront"
           },
           "pricePerHourCents": {
             "type": "integer",
@@ -355,12 +342,6 @@
           "cancellationReason": {
             "type": ["string", "null"]
           },
-          "feeCents": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991,
-            "description": "Cancellation or no-show fee charged"
-          },
           "payment": {
             "anyOf": [
               {
@@ -368,40 +349,16 @@
                 "properties": {
                   "status": {
                     "type": "string",
-                    "enum": [
-                      "pending_authorisation",
-                      "card_saved",
-                      "authorised",
-                      "captured",
-                      "cancelled",
-                      "failed"
-                    ]
+                    "enum": ["pending", "authorised", "paid", "cancelled", "failed"],
+                    "description": "`authorised` while a request's price is held on the card, `paid` once charged"
                   },
-                  "authorisedCents": {
+                  "amountCents": {
                     "type": "integer",
                     "minimum": -9007199254740991,
                     "maximum": 9007199254740991
-                  },
-                  "capturedCents": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "authoriseAt": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "format": "date-time",
-                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "description": "When a saved card will be authorised"
                   }
                 },
-                "required": ["status", "authorisedCents", "capturedCents", "authoriseAt"]
+                "required": ["status", "amountCents"]
               },
               {
                 "type": "null"
@@ -456,7 +413,6 @@
           "cancelledAt",
           "cancelledBy",
           "cancellationReason",
-          "feeCents",
           "payment",
           "addressVisible",
           "address",
@@ -937,6 +893,19 @@
               }
             ]
           },
+          "netPerHourCents": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the host receives for an hour's booking after the card fee passed on to them (and any platform fee); longer bookings spread the card fee's fixed part"
+          },
           "currency": {
             "type": "string",
             "enum": ["EUR", "GBP"]
@@ -1022,6 +991,7 @@
           "timezone",
           "acceptingBookings",
           "pricePerHourCents",
+          "netPerHourCents",
           "currency",
           "kwhCap",
           "instantBook",
@@ -1195,10 +1165,23 @@
                 "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
                 "description": "First day of the period in the host's time zone"
               },
+              "grossCents": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "What drivers paid for the period's bookings, less refunds"
+              },
+              "cardFeeCents": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "The card fees passed on to the host"
+              },
               "earningsCents": {
                 "type": "integer",
                 "minimum": -9007199254740991,
-                "maximum": 9007199254740991
+                "maximum": 9007199254740991,
+                "description": "What the host receives: gross less fees"
               },
               "sessions": {
                 "type": "integer",
@@ -1213,7 +1196,15 @@
                 "enum": ["EUR", "GBP"]
               }
             },
-            "required": ["start", "earningsCents", "sessions", "kwh", "currency"],
+            "required": [
+              "start",
+              "grossCents",
+              "cardFeeCents",
+              "earningsCents",
+              "sessions",
+              "kwh",
+              "currency"
+            ],
             "description": "This calendar month: the host's share of captured payments (paid out or pending), finished sessions and their kWh"
           },
           "weeks": {
@@ -1229,10 +1220,23 @@
                   "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
                   "description": "First day of the period in the host's time zone"
                 },
+                "grossCents": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "What drivers paid for the period's bookings, less refunds"
+                },
+                "cardFeeCents": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "The card fees passed on to the host"
+                },
                 "earningsCents": {
                   "type": "integer",
                   "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
+                  "maximum": 9007199254740991,
+                  "description": "What the host receives: gross less fees"
                 },
                 "sessions": {
                   "type": "integer",
@@ -1243,7 +1247,14 @@
                   "type": "number"
                 }
               },
-              "required": ["start", "earningsCents", "sessions", "kwh"]
+              "required": [
+                "start",
+                "grossCents",
+                "cardFeeCents",
+                "earningsCents",
+                "sessions",
+                "kwh"
+              ]
             },
             "description": "The last 8 weeks, Monday to Sunday, oldest first; the last is this week"
           },
@@ -1441,122 +1452,196 @@
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
           },
-          "sessionId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-          },
           "role": {
             "type": "string",
             "enum": ["driver", "host"]
           },
-          "status": {
-            "type": "string",
-            "enum": ["pending", "awaiting_host_confirmation", "needs_review", "paid"],
-            "description": "`pending` until reconciled; `awaiting_host_confirmation` when the session was closed without a stop; `needs_review` while support checks it; `paid` once captured"
-          },
-          "sessionStatus": {
+          "bookingStatus": {
             "type": "string",
             "enum": [
-              "starting",
-              "charging",
-              "suspended_ev",
-              "suspended_evse",
-              "stopped",
-              "needs_review",
-              "needs_host_confirmation",
-              "reconciled",
-              "failed"
+              "requested",
+              "confirmed",
+              "arrived",
+              "active",
+              "completed",
+              "cancelled",
+              "no_show"
             ]
           },
           "currency": {
             "type": "string",
             "enum": ["EUR", "GBP"]
           },
-          "startedAt": {
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "The booked slot, which is the charging window"
+          },
+          "end": {
             "type": "string",
             "format": "date-time",
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
           },
-          "stoppedAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
-          },
-          "durationMinutes": {
+          "bookedMinutes": {
             "type": "integer",
             "minimum": -9007199254740991,
-            "maximum": 9007199254740991,
-            "description": "From session start to stop, rounded up"
-          },
-          "billedMinutes": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991,
-            "description": "Rounded up to the next 5 minutes"
-          },
-          "kwh": {
-            "description": "Energy delivered: the meter delta",
-            "type": ["number", "null"]
-          },
-          "meter": {
-            "type": "object",
-            "properties": {
-              "startKwh": {
-                "type": ["number", "null"]
-              },
-              "stopKwh": {
-                "type": ["number", "null"]
-              }
-            },
-            "required": ["startKwh", "stopKwh"]
+            "maximum": 9007199254740991
           },
           "pricePerHourCents": {
             "type": "integer",
             "minimum": -9007199254740991,
             "maximum": 9007199254740991
           },
-          "quotedAmountCents": {
+          "paidCents": {
             "type": "integer",
             "minimum": -9007199254740991,
-            "maximum": 9007199254740991
+            "maximum": 9007199254740991,
+            "description": "The booking's price, paid upfront"
           },
-          "lines": {
+          "refunds": {
             "type": "array",
             "items": {
               "type": "object",
               "properties": {
-                "kind": {
-                  "type": "string",
-                  "enum": ["time", "cap", "adjustment", "platform_fee"]
-                },
-                "description": {
-                  "type": "string"
-                },
                 "amountCents": {
                   "type": "integer",
                   "minimum": -9007199254740991,
-                  "maximum": 9007199254740991,
-                  "description": "Negative for a reduction. A platform fee is taken from the host's payout, not added"
+                  "maximum": 9007199254740991
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": ["driver_cancelled", "host_cancelled", "charger_fault", "support"]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["pending", "succeeded", "failed"]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
                 }
               },
-              "required": ["kind", "description", "amountCents"]
+              "required": ["amountCents", "reason", "status", "createdAt"]
             }
           },
-          "capNote": {
-            "description": "Set when the quote capped the charge",
-            "type": ["string", "null"]
+          "refundedCents": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Refunded, or being refunded"
           },
           "totalCents": {
             "type": "integer",
             "minimum": -9007199254740991,
             "maximum": 9007199254740991,
-            "description": "What the driver pays: captured once paid, otherwise the amount due"
+            "description": "What the driver paid, less refunds"
           },
-          "platformFeeCents": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991
+          "session": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "starting",
+                      "charging",
+                      "suspended_ev",
+                      "suspended_evse",
+                      "stopped",
+                      "needs_review",
+                      "reconciled",
+                      "failed"
+                    ]
+                  },
+                  "startedAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "stoppedAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "stopReason": {
+                    "type": ["string", "null"]
+                  },
+                  "kwh": {
+                    "description": "Energy delivered: the meter delta",
+                    "type": ["number", "null"]
+                  },
+                  "meter": {
+                    "type": "object",
+                    "properties": {
+                      "startKwh": {
+                        "type": ["number", "null"]
+                      },
+                      "stopKwh": {
+                        "type": ["number", "null"]
+                      }
+                    },
+                    "required": ["startKwh", "stopKwh"]
+                  },
+                  "samples": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                        },
+                        "registerKwh": {
+                          "type": ["number", "null"]
+                        },
+                        "kw": {
+                          "type": ["number", "null"]
+                        }
+                      },
+                      "required": ["at", "registerKwh", "kw"]
+                    },
+                    "description": "Meter readings and power while charging, oldest first: evidence the charger worked"
+                  }
+                },
+                "required": [
+                  "sessionId",
+                  "status",
+                  "startedAt",
+                  "stoppedAt",
+                  "stopReason",
+                  "kwh",
+                  "meter",
+                  "samples"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The charging session; null when none started"
           },
           "effectiveCentsPerKwh": {
             "anyOf": [
@@ -1569,7 +1654,7 @@
                 "type": "null"
               }
             ],
-            "description": "The total divided by the energy delivered, for comparison; billing is by time"
+            "description": "What was paid divided by the energy delivered, for comparison only"
           },
           "card": {
             "anyOf": [
@@ -1591,44 +1676,41 @@
             ],
             "description": "The driver's card; driver only"
           },
-          "hostPayout": {
+          "hostEarnings": {
             "anyOf": [
               {
                 "type": "object",
                 "properties": {
-                  "amountCents": {
+                  "grossCents": {
                     "type": "integer",
                     "minimum": -9007199254740991,
                     "maximum": 9007199254740991
                   },
-                  "status": {
-                    "type": "string",
-                    "enum": ["pending", "held", "sent", "failed", "reversed"]
+                  "cardFeeCents": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "description": "The card fee, passed on to the host"
                   },
-                  "holdReason": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          "session_needs_review",
-                          "dispute_open",
-                          "tax_details_incomplete",
-                          "payouts_not_enabled"
-                        ]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
+                  "platformFeeCents": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "netCents": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "description": "What the host receives"
                   }
                 },
-                "required": ["amountCents", "status", "holdReason"]
+                "required": ["grossCents", "cardFeeCents", "platformFeeCents", "netCents"]
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The host's transfer; host only, once the payment is captured"
+            "description": "Host only"
           },
           "review": {
             "anyOf": [
@@ -1664,26 +1746,21 @@
         },
         "required": [
           "bookingId",
-          "sessionId",
           "role",
-          "status",
-          "sessionStatus",
+          "bookingStatus",
           "currency",
-          "startedAt",
-          "stoppedAt",
-          "durationMinutes",
-          "billedMinutes",
-          "kwh",
-          "meter",
+          "start",
+          "end",
+          "bookedMinutes",
           "pricePerHourCents",
-          "quotedAmountCents",
-          "lines",
-          "capNote",
+          "paidCents",
+          "refunds",
+          "refundedCents",
           "totalCents",
-          "platformFeeCents",
+          "session",
           "effectiveCentsPerKwh",
           "card",
-          "hostPayout",
+          "hostEarnings",
           "review",
           "canReview"
         ]
@@ -1814,7 +1891,6 @@
               "suspended_evse",
               "stopped",
               "needs_review",
-              "needs_host_confirmation",
               "reconciled",
               "failed"
             ]
@@ -1847,17 +1923,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991,
-            "description": "Seconds billed so far"
-          },
-          "costSoFar": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991,
-            "description": "Cost so far in cents: elapsed time rounded up to 5 minutes at the hourly price, capped at the quote"
-          },
-          "currency": {
-            "type": "string",
-            "enum": ["EUR", "GBP"]
+            "description": "Seconds since charging started; the booking was paid upfront, so nothing is billed by time or energy"
           },
           "lastSeenAt": {
             "anyOf": [
@@ -1939,8 +2005,6 @@
           "kwh",
           "kw",
           "elapsed",
-          "costSoFar",
-          "currency",
           "lastSeenAt",
           "startAt",
           "stoppedAt",
@@ -2073,7 +2137,7 @@
             "type": "integer",
             "minimum": -9007199254740991,
             "maximum": 9007199254740991,
-            "description": "The most the driver can be charged"
+            "description": "The booking's price, paid upfront"
           },
           "pricePerHourCents": {
             "type": "integer",
@@ -2125,12 +2189,6 @@
           "cancellationReason": {
             "type": ["string", "null"]
           },
-          "feeCents": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991,
-            "description": "Cancellation or no-show fee charged"
-          },
           "payment": {
             "anyOf": [
               {
@@ -2138,40 +2196,16 @@
                 "properties": {
                   "status": {
                     "type": "string",
-                    "enum": [
-                      "pending_authorisation",
-                      "card_saved",
-                      "authorised",
-                      "captured",
-                      "cancelled",
-                      "failed"
-                    ]
+                    "enum": ["pending", "authorised", "paid", "cancelled", "failed"],
+                    "description": "`authorised` while a request's price is held on the card, `paid` once charged"
                   },
-                  "authorisedCents": {
+                  "amountCents": {
                     "type": "integer",
                     "minimum": -9007199254740991,
                     "maximum": 9007199254740991
-                  },
-                  "capturedCents": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "authoriseAt": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "format": "date-time",
-                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "description": "When a saved card will be authorised"
                   }
                 },
-                "required": ["status", "authorisedCents", "capturedCents", "authoriseAt"],
+                "required": ["status", "amountCents"],
                 "additionalProperties": false
               },
               {
@@ -2228,7 +2262,6 @@
           "cancelledAt",
           "cancelledBy",
           "cancellationReason",
-          "feeCents",
           "payment",
           "addressVisible",
           "address",
@@ -2722,6 +2755,19 @@
               }
             ]
           },
+          "netPerHourCents": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the host receives for an hour's booking after the card fee passed on to them (and any platform fee); longer bookings spread the card fee's fixed part"
+          },
           "currency": {
             "type": "string",
             "enum": ["EUR", "GBP"]
@@ -2810,6 +2856,7 @@
           "timezone",
           "acceptingBookings",
           "pricePerHourCents",
+          "netPerHourCents",
           "currency",
           "kwhCap",
           "instantBook",
@@ -2987,10 +3034,23 @@
                 "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
                 "description": "First day of the period in the host's time zone"
               },
+              "grossCents": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "What drivers paid for the period's bookings, less refunds"
+              },
+              "cardFeeCents": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "The card fees passed on to the host"
+              },
               "earningsCents": {
                 "type": "integer",
                 "minimum": -9007199254740991,
-                "maximum": 9007199254740991
+                "maximum": 9007199254740991,
+                "description": "What the host receives: gross less fees"
               },
               "sessions": {
                 "type": "integer",
@@ -3005,7 +3065,15 @@
                 "enum": ["EUR", "GBP"]
               }
             },
-            "required": ["start", "earningsCents", "sessions", "kwh", "currency"],
+            "required": [
+              "start",
+              "grossCents",
+              "cardFeeCents",
+              "earningsCents",
+              "sessions",
+              "kwh",
+              "currency"
+            ],
             "additionalProperties": false,
             "description": "This calendar month: the host's share of captured payments (paid out or pending), finished sessions and their kWh"
           },
@@ -3022,10 +3090,23 @@
                   "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
                   "description": "First day of the period in the host's time zone"
                 },
+                "grossCents": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "What drivers paid for the period's bookings, less refunds"
+                },
+                "cardFeeCents": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "The card fees passed on to the host"
+                },
                 "earningsCents": {
                   "type": "integer",
                   "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
+                  "maximum": 9007199254740991,
+                  "description": "What the host receives: gross less fees"
                 },
                 "sessions": {
                   "type": "integer",
@@ -3036,7 +3117,14 @@
                   "type": "number"
                 }
               },
-              "required": ["start", "earningsCents", "sessions", "kwh"],
+              "required": [
+                "start",
+                "grossCents",
+                "cardFeeCents",
+                "earningsCents",
+                "sessions",
+                "kwh"
+              ],
               "additionalProperties": false
             },
             "description": "The last 8 weeks, Monday to Sunday, oldest first; the last is this week"
@@ -3243,124 +3331,200 @@
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
           },
-          "sessionId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-          },
           "role": {
             "type": "string",
             "enum": ["driver", "host"]
           },
-          "status": {
-            "type": "string",
-            "enum": ["pending", "awaiting_host_confirmation", "needs_review", "paid"],
-            "description": "`pending` until reconciled; `awaiting_host_confirmation` when the session was closed without a stop; `needs_review` while support checks it; `paid` once captured"
-          },
-          "sessionStatus": {
+          "bookingStatus": {
             "type": "string",
             "enum": [
-              "starting",
-              "charging",
-              "suspended_ev",
-              "suspended_evse",
-              "stopped",
-              "needs_review",
-              "needs_host_confirmation",
-              "reconciled",
-              "failed"
+              "requested",
+              "confirmed",
+              "arrived",
+              "active",
+              "completed",
+              "cancelled",
+              "no_show"
             ]
           },
           "currency": {
             "type": "string",
             "enum": ["EUR", "GBP"]
           },
-          "startedAt": {
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "The booked slot, which is the charging window"
+          },
+          "end": {
             "type": "string",
             "format": "date-time",
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
           },
-          "stoppedAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
-          },
-          "durationMinutes": {
+          "bookedMinutes": {
             "type": "integer",
             "minimum": -9007199254740991,
-            "maximum": 9007199254740991,
-            "description": "From session start to stop, rounded up"
-          },
-          "billedMinutes": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991,
-            "description": "Rounded up to the next 5 minutes"
-          },
-          "kwh": {
-            "description": "Energy delivered: the meter delta",
-            "type": ["number", "null"]
-          },
-          "meter": {
-            "type": "object",
-            "properties": {
-              "startKwh": {
-                "type": ["number", "null"]
-              },
-              "stopKwh": {
-                "type": ["number", "null"]
-              }
-            },
-            "required": ["startKwh", "stopKwh"],
-            "additionalProperties": false
+            "maximum": 9007199254740991
           },
           "pricePerHourCents": {
             "type": "integer",
             "minimum": -9007199254740991,
             "maximum": 9007199254740991
           },
-          "quotedAmountCents": {
+          "paidCents": {
             "type": "integer",
             "minimum": -9007199254740991,
-            "maximum": 9007199254740991
+            "maximum": 9007199254740991,
+            "description": "The booking's price, paid upfront"
           },
-          "lines": {
+          "refunds": {
             "type": "array",
             "items": {
               "type": "object",
               "properties": {
-                "kind": {
-                  "type": "string",
-                  "enum": ["time", "cap", "adjustment", "platform_fee"]
-                },
-                "description": {
-                  "type": "string"
-                },
                 "amountCents": {
                   "type": "integer",
                   "minimum": -9007199254740991,
-                  "maximum": 9007199254740991,
-                  "description": "Negative for a reduction. A platform fee is taken from the host's payout, not added"
+                  "maximum": 9007199254740991
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": ["driver_cancelled", "host_cancelled", "charger_fault", "support"]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["pending", "succeeded", "failed"]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
                 }
               },
-              "required": ["kind", "description", "amountCents"],
+              "required": ["amountCents", "reason", "status", "createdAt"],
               "additionalProperties": false
             }
           },
-          "capNote": {
-            "description": "Set when the quote capped the charge",
-            "type": ["string", "null"]
+          "refundedCents": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Refunded, or being refunded"
           },
           "totalCents": {
             "type": "integer",
             "minimum": -9007199254740991,
             "maximum": 9007199254740991,
-            "description": "What the driver pays: captured once paid, otherwise the amount due"
+            "description": "What the driver paid, less refunds"
           },
-          "platformFeeCents": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991
+          "session": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "starting",
+                      "charging",
+                      "suspended_ev",
+                      "suspended_evse",
+                      "stopped",
+                      "needs_review",
+                      "reconciled",
+                      "failed"
+                    ]
+                  },
+                  "startedAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "stoppedAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "stopReason": {
+                    "type": ["string", "null"]
+                  },
+                  "kwh": {
+                    "description": "Energy delivered: the meter delta",
+                    "type": ["number", "null"]
+                  },
+                  "meter": {
+                    "type": "object",
+                    "properties": {
+                      "startKwh": {
+                        "type": ["number", "null"]
+                      },
+                      "stopKwh": {
+                        "type": ["number", "null"]
+                      }
+                    },
+                    "required": ["startKwh", "stopKwh"],
+                    "additionalProperties": false
+                  },
+                  "samples": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                        },
+                        "registerKwh": {
+                          "type": ["number", "null"]
+                        },
+                        "kw": {
+                          "type": ["number", "null"]
+                        }
+                      },
+                      "required": ["at", "registerKwh", "kw"],
+                      "additionalProperties": false
+                    },
+                    "description": "Meter readings and power while charging, oldest first: evidence the charger worked"
+                  }
+                },
+                "required": [
+                  "sessionId",
+                  "status",
+                  "startedAt",
+                  "stoppedAt",
+                  "stopReason",
+                  "kwh",
+                  "meter",
+                  "samples"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The charging session; null when none started"
           },
           "effectiveCentsPerKwh": {
             "anyOf": [
@@ -3373,7 +3537,7 @@
                 "type": "null"
               }
             ],
-            "description": "The total divided by the energy delivered, for comparison; billing is by time"
+            "description": "What was paid divided by the energy delivered, for comparison only"
           },
           "card": {
             "anyOf": [
@@ -3396,45 +3560,42 @@
             ],
             "description": "The driver's card; driver only"
           },
-          "hostPayout": {
+          "hostEarnings": {
             "anyOf": [
               {
                 "type": "object",
                 "properties": {
-                  "amountCents": {
+                  "grossCents": {
                     "type": "integer",
                     "minimum": -9007199254740991,
                     "maximum": 9007199254740991
                   },
-                  "status": {
-                    "type": "string",
-                    "enum": ["pending", "held", "sent", "failed", "reversed"]
+                  "cardFeeCents": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "description": "The card fee, passed on to the host"
                   },
-                  "holdReason": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          "session_needs_review",
-                          "dispute_open",
-                          "tax_details_incomplete",
-                          "payouts_not_enabled"
-                        ]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
+                  "platformFeeCents": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "netCents": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "description": "What the host receives"
                   }
                 },
-                "required": ["amountCents", "status", "holdReason"],
+                "required": ["grossCents", "cardFeeCents", "platformFeeCents", "netCents"],
                 "additionalProperties": false
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The host's transfer; host only, once the payment is captured"
+            "description": "Host only"
           },
           "review": {
             "anyOf": [
@@ -3471,26 +3632,21 @@
         },
         "required": [
           "bookingId",
-          "sessionId",
           "role",
-          "status",
-          "sessionStatus",
+          "bookingStatus",
           "currency",
-          "startedAt",
-          "stoppedAt",
-          "durationMinutes",
-          "billedMinutes",
-          "kwh",
-          "meter",
+          "start",
+          "end",
+          "bookedMinutes",
           "pricePerHourCents",
-          "quotedAmountCents",
-          "lines",
-          "capNote",
+          "paidCents",
+          "refunds",
+          "refundedCents",
           "totalCents",
-          "platformFeeCents",
+          "session",
           "effectiveCentsPerKwh",
           "card",
-          "hostPayout",
+          "hostEarnings",
           "review",
           "canReview"
         ],
@@ -4187,7 +4343,7 @@
       "patch": {
         "summary": "Set a charger's price, availability and listing",
         "tags": ["hosts"],
-        "description": "Changes only the fields sent. `availability` replaces every window; price, kWh cap and instant book apply to every window. Publishing (`acceptingBookings: true`) needs the charger online on firmware 5.794 or later, payouts enabled and at least one window, otherwise 409 lists what is missing.",
+        "description": "Changes only the fields sent. `availability` replaces every window; price, kWh cap and instant book apply to every window. Publishing (`acceptingBookings: true`) needs the charger online on firmware 5.794 or later, payouts enabled, tax details given and at least one window, otherwise 409 lists what is missing.",
         "requestBody": {
           "required": true,
           "content": {
@@ -4353,7 +4509,7 @@
       "get": {
         "summary": "The host's home screen",
         "tags": ["hosts"],
-        "description": "This month's earnings, sessions and kWh, an 8-week weekly series, a card per charger (status pill, listing switch, next booking), tonight's bookings and requests waiting for an answer. Periods are in the host's time zone and a booking counts in the period its slot starts in. Earnings are the host's share of captured payments, paid out or pending, in the currency the host is paid in.",
+        "description": "This month's earnings, sessions and kWh, an 8-week weekly series, a card per charger (status pill, listing switch, next booking), tonight's bookings and requests waiting for an answer. Periods are in the host's time zone and a booking counts in the period its slot starts in. Each booking is paid upfront as a destination charge to the host's account: a period shows what drivers paid (less refunds), the card fees passed on to the host, and what the host keeps, in the currency the host is paid in.",
         "responses": {
           "200": {
             "description": "Default Response",
@@ -4744,7 +4900,7 @@
       "post": {
         "summary": "Book a slot",
         "tags": ["bookings"],
-        "description": "Books a charger for a slot inside one of its availability windows. With instant book the booking is confirmed at once; otherwise it waits for the host. The quote is the slot's minutes at the hourly price, with no fee added. A slot starting within 6 days is authorised on the card now (manual capture); a later one keeps the saved card and is authorised 24 hours before the start. An overlapping slot is 409 and nothing is charged; a declined card is 402.",
+        "description": "Books a charger for a slot inside one of its availability windows; the slot is the charging window. The price is the slot's minutes at the hourly price, with no fee added, and is paid upfront: with instant book the booking is confirmed and the card charged at once; otherwise the price is held on the card until the host approves (charged) or declines or lets the request expire after 24 hours (released). A driver may have at most 3 requests waiting, and make a limited number of bookings an hour (429). An overlapping slot is 409 and nothing is charged; a declined card is 402. When the payment provider does not answer, the booking is returned with its payment `pending` and finished in the background.",
         "requestBody": {
           "required": true,
           "content": {
@@ -4865,7 +5021,7 @@
               }
             }
           },
-          "502": {
+          "429": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -5115,7 +5271,7 @@
       "post": {
         "summary": "Approve a booking request",
         "tags": ["bookings", "hosts"],
-        "description": "The host of the charger confirms a requested booking; its idTag is issued. 409 if the slot has been taken since.",
+        "description": "The host of the charger confirms a requested booking; its idTag is issued and the price held on the driver's card is charged. 409 if the slot has been taken since or the hold is not in place yet; 402 when the hold has lapsed, which cancels the booking.",
         "parameters": [
           {
             "schema": {
@@ -5150,6 +5306,16 @@
             }
           },
           "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "402": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -5196,7 +5362,7 @@
       "post": {
         "summary": "Decline a booking request",
         "tags": ["bookings", "hosts"],
-        "description": "The host turns a request down; the card authorisation is released.",
+        "description": "The host turns a request down; the hold on the driver's card is released.",
         "requestBody": {
           "required": true,
           "content": {
@@ -5311,7 +5477,7 @@
       "post": {
         "summary": "Cancel a booking",
         "tags": ["bookings"],
-        "description": "The driver or the host cancels a requested or confirmed booking. A driver cancelling a confirmed booking after the host's cutoff (default 2 hours before the start) pays one hour at the hourly price, capped at the quote; otherwise the authorisation is released. Once the driver has arrived a booking can only be stopped (409).",
+        "description": "The driver or the host cancels a requested or confirmed booking. A request's hold is released. A confirmed booking is refunded in full when the host cancels or the driver cancels before the host's cutoff (default 2 hours before the start), and not at all when the driver cancels after it. Once the driver has arrived a booking can only be stopped (409).",
         "requestBody": {
           "required": true,
           "content": {
@@ -5416,7 +5582,7 @@
       "post": {
         "summary": "Check in at the charger",
         "tags": ["sessions"],
-        "description": "The driver says they have arrived, from 15 minutes before the slot starts until it ends: a confirmed booking becomes arrived and the window-end stop is scheduled. A position (lat and lng), when sent, is compared with the charger's; the distance is recorded but never refused. Checking in again changes nothing.",
+        "description": "The driver says they have arrived, from a few hours before the slot starts (ARRIVAL_LEAD_MINUTES, 4 hours by default) until it ends: a confirmed, paid booking becomes arrived and the window-end stop is scheduled. 409 `payment-pending` while the payment has not gone through. A position (lat and lng), when sent, is compared with the charger's; the distance is recorded but never refused. Checking in again changes nothing.",
         "requestBody": {
           "required": true,
           "content": {
@@ -5569,7 +5735,7 @@
       "post": {
         "summary": "Start charging",
         "tags": ["sessions"],
-        "description": "The driver of an arrived booking starts charging: the charger is sent a remote start with the booking's idTag. The answer is the session: `starting` until the charger reports StartTransaction (then `charging`, pushed as `session:update`), or `failed` with a reason and copy to show, after which starting again retries. A charger that refuses because a stale transaction is open is soft-reset and the start retried once. With `startAt` in the future the session is `scheduled` and the remote start is sent then. Starting while a start is pending or a session runs returns it unchanged.",
+        "description": "The driver of an arrived booking starts charging: the charger is sent a remote start with the booking's idTag. The answer is the session: `starting` until the charger reports StartTransaction (then `charging`, pushed as `session:update`), or `failed` with a reason and copy to show, after which starting again retries. A charger that refuses because a stale transaction is open is soft-reset and the start retried once. Before the slot starts (the driver plugged in early), or with `startAt` in the future, the session is `scheduled` and the remote start is sent at the slot start (or `startAt`); waiting is never billed. Starting while a start is pending or a session runs returns it unchanged. 409 `payment-pending` until the booking is paid.",
         "requestBody": {
           "required": true,
           "content": {
@@ -5580,7 +5746,7 @@
                     "type": "object",
                     "properties": {
                       "startAt": {
-                        "description": "Start charging later, inside the slot (for a cheaper night rate). The driver plugs in now and pays from now.",
+                        "description": "Start charging later, inside the slot (for a cheaper night rate). The driver plugs in now; the booked hours were paid upfront and waiting is never billed.",
                         "type": "string",
                         "format": "date-time",
                         "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
@@ -6038,7 +6204,7 @@
       "put": {
         "summary": "Set your tax details",
         "tags": ["hosts"],
-        "description": "Stores the legal identity and tax identification number that EU (DAC7) and UK platform reporting need before a host's first payout, marks the host's tax details complete and releases transfers held only for them. The TIN is checked against its country's format (a PPSN with its check letter for Ireland; a 10-digit UTR or a National Insurance number for the UK). The TIN and date of birth are encrypted at rest. Replaces any earlier details.",
+        "description": "Stores the legal identity and tax identification number that EU (DAC7) and UK platform reporting need, and marks the host's tax details complete: a listing cannot be published without them. The TIN is checked against its country's format (a PPSN with its check letter for Ireland; a 10-digit UTR or a National Insurance number for the UK). The TIN and date of birth are encrypted at rest. Replaces any earlier details.",
         "requestBody": {
           "required": true,
           "content": {
@@ -6299,7 +6465,7 @@
       "get": {
         "summary": "A booking's receipt",
         "tags": ["bookings"],
-        "description": "For the driver or the host, once the session has stopped (409 before). Billing is by time: the minutes from session start to stop, rounded up to 5, at the hourly price and capped at the quote. Shows the energy delivered (meter start to stop), the effective price per kWh for comparison, the driver's card (driver only) and the host's payout (host only).",
+        "description": "For the driver or the host, once a paid booking has finished or its session has stopped (409 before). The driver paid the booked hours upfront; the receipt shows that price, any refunds, and the session as evidence of what the charger did: start and stop, kWh delivered (meter start to stop), meter readings and power samples. Nothing is billed by energy or by minutes used. The driver sees their card; the host sees the card fee passed on to them and what they keep.",
         "parameters": [
           {
             "schema": {
@@ -6592,7 +6758,7 @@
       "post": {
         "summary": "Emergency stop",
         "tags": ["hosts"],
-        "description": "The host stops the booking session charging on their charger now (RemoteStopTransaction). The session closes, and is billed as usual, when the charger reports the stop. 404 for another host's charger, 409 when nothing is charging or the charger rejects the stop, 503 when it does not answer.",
+        "description": "The host stops the booking session charging on their charger now (RemoteStopTransaction). The session closes when the charger reports the stop; the booking was paid upfront and is not refunded automatically. 404 for another host's charger, 409 when nothing is charging or the charger rejects the stop, 503 when it does not answer.",
         "parameters": [
           {
             "schema": {
@@ -6683,95 +6849,11 @@
         }
       }
     },
-    "/hosts/sessions/{id}/confirm": {
+    "/admin/bookings/{id}/refund": {
       "post": {
-        "summary": "Confirm a session closed without a stop",
-        "tags": ["hosts"],
-        "description": "When the charger never reported the end of a session, it is closed from the last meter value and waits for the host. Confirming bills the driver now; otherwise they are billed 72 hours after it was closed. 409 unless the session is waiting for the caller's confirmation.",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-            },
-            "in": "path",
-            "name": "id",
-            "required": true
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "sessionId": {
-                      "type": "string",
-                      "format": "uuid",
-                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                    },
-                    "confirmed": {
-                      "type": "boolean",
-                      "enum": [true]
-                    }
-                  },
-                  "required": ["sessionId", "confirmed"],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/hosts/sessions/{id}/dispute": {
-      "post": {
-        "summary": "Dispute a session closed without a stop",
-        "tags": ["hosts"],
-        "description": "Instead of confirming, the host disputes the recorded session. Nothing is charged or paid out until support resolves it.",
+        "summary": "Refund a booking",
+        "tags": ["admin"],
+        "description": "Support refunds a paid booking in full or in part, for anything the automatic rules do not cover (a session that went partly wrong, a dispute). The host's share and the application fee are reversed in proportion. Never more than what is left to refund (422). Admins only (ADMIN_USER_IDS).",
         "requestBody": {
           "required": true,
           "content": {
@@ -6779,18 +6861,20 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "reason": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 200
+                  "amountCents": {
+                    "description": "What to refund; the rest of what was paid when omitted (a full refund)",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
                   },
-                  "details": {
+                  "note": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 2000
+                    "maxLength": 1000,
+                    "description": "Why, for the record"
                   }
                 },
-                "required": ["reason"]
+                "required": ["note"]
               }
             }
           }
@@ -6815,117 +6899,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "sessionId": {
-                      "type": "string",
-                      "format": "uuid",
-                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                    },
-                    "disputeId": {
-                      "type": "string",
-                      "format": "uuid",
-                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                    }
-                  },
-                  "required": ["sessionId", "disputeId"],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/admin/sessions/{id}/resolve": {
-      "post": {
-        "summary": "Resolve a session that needs review",
-        "tags": ["admin"],
-        "description": "Support decides what the driver pays for a session in review (meter mismatch, missing stop, dispute): the amount is captured, open disputes on the booking are resolved, and the host's transfer is sent or held. Admins only (ADMIN_USER_IDS).",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "amountCents": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991,
-                    "description": "What the driver pays; at most what was authorised. 0 releases the authorisation"
-                  },
-                  "note": {
-                    "description": "Recorded on any open dispute",
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 1000
-                  }
-                },
-                "required": ["amountCents"]
-              }
-            }
-          }
-        },
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-            },
-            "in": "path",
-            "name": "id",
-            "required": true
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "sessionId": {
+                    "bookingId": {
                       "type": "string",
                       "format": "uuid",
                       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
@@ -6934,9 +6908,17 @@
                       "type": "integer",
                       "minimum": -9007199254740991,
                       "maximum": 9007199254740991
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": ["driver_cancelled", "host_cancelled", "charger_fault", "support"]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["pending", "succeeded", "failed"]
                     }
                   },
-                  "required": ["sessionId", "amountCents"],
+                  "required": ["bookingId", "amountCents", "reason", "status"],
                   "additionalProperties": false
                 }
               }
@@ -6993,16 +6975,6 @@
             }
           },
           "422": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "502": {
             "description": "Default Response",
             "content": {
               "application/json": {

@@ -30,6 +30,7 @@ const owned = {
   acceptingBookings: false,
   hostId: host.id,
   payoutStatus: "enabled",
+  taxDetailsComplete: true,
   currency: "GBP",
 } satisfies data.OwnedCharger;
 
@@ -47,6 +48,7 @@ const view = {
   timezone: "Europe/Dublin",
   acceptingBookings: true,
   payoutStatus: "enabled",
+  taxDetailsComplete: true,
   currency: "EUR",
   maxSessionsPerDay: 2,
   nightRateStart: "23:00:00",
@@ -297,6 +299,8 @@ describe("PATCH /hosts/chargers/:id", () => {
     ]);
     expect(response.json()).toMatchObject({
       pricePerHourCents: 250,
+      // An hour at €2.50 less the card fee passed on (1.5 % + 25 cents, rounded up): €2.21.
+      netPerHourCents: 221,
       availability: [{ weekday: 1, start: "20:00", end: "08:00" }],
       nightRateWindow: { start: "23:00", end: "08:00" },
       publishBlockers: [],
@@ -354,13 +358,19 @@ describe("PATCH /hosts/chargers/:id", () => {
       ...owned,
       status: "onboarding",
       payoutStatus: "pending",
+      taxDetailsComplete: false,
     });
     vi.mocked(data.rulesOf).mockResolvedValue([]);
     const response = await send("PATCH", url, { acceptingBookings: true });
     expect(response.statusCode).toBe(409);
     expect(
       response.json<{ reasons: { code: string }[] }>().reasons.map((reason) => reason.code),
-    ).toEqual(["charger-not-online", "payouts-not-enabled", "no-availability"]);
+    ).toEqual([
+      "charger-not-online",
+      "payouts-not-enabled",
+      "tax-details-missing",
+      "no-availability",
+    ]);
     expect(data.setAcceptingBookings).not.toHaveBeenCalled();
   });
 
@@ -397,6 +407,7 @@ describe("PATCH /hosts/chargers/:id", () => {
     const response = await send("PATCH", url, {});
     expect(response.json()).toMatchObject({
       pricePerHourCents: null,
+      netPerHourCents: null,
       currency: "EUR",
       kwhCap: null,
       instantBook: false,

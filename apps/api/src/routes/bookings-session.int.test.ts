@@ -1,7 +1,16 @@
 import { randomBytes } from "node:crypto";
 import type { AddressInfo } from "node:net";
 
-import { bookings, chargers, hosts, meterValues, ocppMessages, sessions, users } from "@nd/db";
+import {
+  bookings,
+  chargers,
+  hosts,
+  meterValues,
+  ocppMessages,
+  payments,
+  sessions,
+  users,
+} from "@nd/db";
 import {
   CHARGER_EVENT_VERSION,
   CHARGER_EVENTS_CHANNEL,
@@ -64,8 +73,12 @@ interface Booking {
   readonly slot: { start: Date; end: Date };
 }
 
-/** A confirmed booking of the driver at a new charger of the host, starting `startIn` from now. */
-async function newBooking({ startIn = -10 * MINUTE, hours = 2 } = {}): Promise<Booking> {
+/** A confirmed, paid booking of the driver at a new charger of the host, starting `startIn` from now. */
+async function newBooking({
+  startIn = -10 * MINUTE,
+  hours = 2,
+  paid = true,
+} = {}): Promise<Booking> {
   const [hostRow] = await h.database.db
     .insert(hosts)
     .values({ userId: hostUserId, payoutStatus: "enabled" })
@@ -107,6 +120,11 @@ async function newBooking({ startIn = -10 * MINUTE, hours = 2 } = {}): Promise<B
     })
     .returning({ id: bookings.id });
   if (booking === undefined) throw new Error("no booking");
+  await h.database.db.insert(payments).values({
+    bookingId: booking.id,
+    amountCents: quote(slot, 250),
+    status: paid ? "paid" : "authorised",
+  });
   return { id: booking.id, chargerId: charger.id, chargeboxId, idTag, slot };
 }
 
@@ -220,13 +238,19 @@ describe("POST /bookings/:id/arrive", () => {
     expect(strangerSocket.messages.filter((message) => message.type !== "ready")).toEqual([]);
   });
 
-  it("refuses an arrival too early, and one after the slot", async () => {
-    const later = await newBooking({ startIn: 60 * MINUTE });
+  it("refuses an arrival too early, one after the slot, and one not paid for", async () => {
+    // Drivers may arrive and plug in up to 4 hours ahead.
+    const later = await newBooking({ startIn: 5 * 60 * MINUTE });
     const early = await call("POST", `/bookings/${later.id}/arrive`, driver, {});
     expect(early.statusCode).toBe(409);
     expect(early.json<{ code: string }>().code).toBe("too-early");
-    clock.current = new Date(later.slot.start.getTime() - 15 * MINUTE);
+    clock.current = new Date(later.slot.start.getTime() - 4 * 60 * MINUTE);
     expect((await call("POST", `/bookings/${later.id}/arrive`, driver, {})).statusCode).toBe(200);
+
+    const unpaid = await newBooking({ paid: false });
+    const refused = await call("POST", `/bookings/${unpaid.id}/arrive`, driver, {});
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json<{ code: string }>().code).toBe("payment-pending");
 
     const over = await newBooking({ startIn: -3 * 60 * MINUTE, hours: 1 });
     const late = await call("POST", `/bookings/${over.id}/arrive`, driver, {});
@@ -248,7 +272,7 @@ describe("start, live updates and stop", () => {
     const hostSocket = await connect(host);
 
     const starting = await start(booking);
-    expect(starting).toMatchObject({ status: "starting", kwh: null, costSoFar: 0 });
+    expect(starting).toMatchObject({ status: "starting", kwh: null, elapsed: 0 });
     expect(control.callsTo("remoteStart")).toEqual([
       { chargeboxId: booking.chargeboxId, idTag: booking.idTag, connectorId: 1 },
     ]);
@@ -305,7 +329,6 @@ describe("start, live updates and stop", () => {
         bookingId: booking.id,
         status: "charging",
         kw: 7.2,
-        costSoFar: 83,
         lastSeenAt: sampledAt.toISOString(),
         startAt: startedAt.toISOString(),
       });
@@ -348,7 +371,7 @@ describe("start, live updates and stop", () => {
       ).resolves.toBeDefined();
       await expect(
         socket.next((m) => m.type === "session:update" && m.status === "stopped"),
-      ).resolves.toMatchObject({ kwh: 2.5, kw: null, stopReason: "Remote", costSoFar: 83 });
+      ).resolves.toMatchObject({ kwh: 2.5, kw: null, stopReason: "Remote" });
     }
     // Stopping a stopped session changes nothing.
     expect((await call("POST", `/bookings/${booking.id}/stop`, driver)).statusCode).toBe(200);
@@ -485,9 +508,9 @@ describe("scheduled start", () => {
     // Starting again keeps the schedule.
     expect((await start(booking)).status).toBe("scheduled");
 
-    // Billing runs from the plug-in while charging waits.
+    // Nothing is counted while charging waits: the booking was paid upfront.
     clock.current = new Date(clock.current.getTime() + 60 * MINUTE);
-    expect(await sessionOf(booking.id)).toMatchObject({ elapsed: 3600, costSoFar: 250 });
+    expect(await sessionOf(booking.id)).toMatchObject({ status: "scheduled", elapsed: 0 });
 
     // Too early, the job does nothing; at the time it starts the session.
     await h.jobs.runNow(remoteStartJob, { bookingId: booking.id });
@@ -496,6 +519,23 @@ describe("scheduled start", () => {
     await h.jobs.runNow(remoteStartJob, { bookingId: booking.id });
     expect(control.callsTo("remoteStart")).toHaveLength(1);
     expect((await sessionOf(booking.id)).status).toBe("starting");
+    await h.jobs.runNow(remoteStartJob, { bookingId: booking.id });
+    expect(control.callsTo("remoteStart")).toHaveLength(1);
+  });
+
+  it("starts at the slot start for a driver who plugged in early", async () => {
+    const booking = await newBooking({ startIn: 2 * 60 * MINUTE });
+    await arrived(booking);
+    const scheduled = await start(booking);
+    expect(scheduled).toMatchObject({
+      status: "scheduled",
+      startAt: booking.slot.start.toISOString(),
+    });
+    const jobs = await jobRows(remoteStartJob.name, booking.id);
+    expect(new Date(jobs.rows[0]?.start_after ?? 0).toISOString()).toBe(
+      booking.slot.start.toISOString(),
+    );
+    clock.current = booking.slot.start;
     await h.jobs.runNow(remoteStartJob, { bookingId: booking.id });
     expect(control.callsTo("remoteStart")).toHaveLength(1);
   });

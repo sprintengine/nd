@@ -25,8 +25,6 @@ export function session(overrides: Partial<Session> = {}): Session {
     stopReason: null,
     status: "starting",
     reviewReason: null,
-    confirmationDueAt: null,
-    hostConfirmedAt: null,
     reconciledAt: null,
     createdAt: new Date("2027-01-12T22:05:00Z"),
     updatedAt: new Date("2027-01-12T22:05:00Z"),
@@ -43,6 +41,7 @@ export function sessionContext(
     booking?: Partial<SessionContext["booking"]>;
     session?: Partial<Session> | null;
     meter?: SessionContext["meter"];
+    paymentStatus?: SessionContext["paymentStatus"];
   } = {},
 ): SessionContext {
   const { booking } = bookingDetail(DRIVER_ID, {
@@ -56,6 +55,7 @@ export function sessionContext(
     booking,
     charger: { id: CHARGER_ID, chargeboxId: "NDTEST0001", location: { lat: 53.326, lng: -6.256 } },
     hostUserId: HOST_USER_ID,
+    paymentStatus: overrides.paymentStatus === undefined ? "paid" : overrides.paymentStatus,
     session:
       overrides.session === null || overrides.session === undefined
         ? null

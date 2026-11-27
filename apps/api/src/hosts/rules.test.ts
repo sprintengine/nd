@@ -81,6 +81,7 @@ describe("publishBlockers", () => {
     status: "online",
     firmware: "5.794",
     payoutStatus: "enabled",
+    taxDetailsComplete: true,
     availabilityCount: 1,
   } as const;
 
@@ -99,12 +100,14 @@ describe("publishBlockers", () => {
       status: "offline",
       firmware: "5.1",
       payoutStatus: "pending",
+      taxDetailsComplete: false,
       availabilityCount: 0,
     });
     expect(blockers.map((blocker) => blocker.code)).toEqual([
       "charger-not-online",
       "firmware-too-old",
       "payouts-not-enabled",
+      "tax-details-missing",
       "no-availability",
     ]);
     expect(blockers[0]?.message).toMatch(/not online/);

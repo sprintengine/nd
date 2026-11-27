@@ -29,8 +29,6 @@ export function sessionRow(overrides: Partial<Session> = {}): Session {
     stopReason: "Remote",
     status: "stopped",
     reviewReason: null,
-    confirmationDueAt: null,
-    hostConfirmedAt: null,
     reconciledAt: null,
     createdAt: SLOT.start,
     updatedAt: SLOT.start,

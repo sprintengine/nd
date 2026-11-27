@@ -47,7 +47,7 @@ const startBody = z
       .datetime({ offset: true })
       .optional()
       .describe(
-        "Start charging later, inside the slot (for a cheaper night rate). The driver plugs in now and pays from now.",
+        "Start charging later, inside the slot (for a cheaper night rate). The driver plugs in now; the booked hours were paid upfront and waiting is never billed.",
       ),
   })
   .nullish();
@@ -65,7 +65,7 @@ export function registerSessionRoutes(app: FastifyInstance, services: SessionSer
       schema: {
         summary: "Check in at the charger",
         description:
-          "The driver says they have arrived, from 15 minutes before the slot starts until it ends: a confirmed booking becomes arrived and the window-end stop is scheduled. A position (lat and lng), when sent, is compared with the charger's; the distance is recorded but never refused. Checking in again changes nothing.",
+          "The driver says they have arrived, from a few hours before the slot starts (ARRIVAL_LEAD_MINUTES, 4 hours by default) until it ends: a confirmed, paid booking becomes arrived and the window-end stop is scheduled. 409 `payment-pending` while the payment has not gone through. A position (lat and lng), when sent, is compared with the charger's; the distance is recorded but never refused. Checking in again changes nothing.",
         tags: ["sessions"],
         params: bookingParams,
         body: arriveBody,
@@ -100,7 +100,7 @@ export function registerSessionRoutes(app: FastifyInstance, services: SessionSer
       schema: {
         summary: "Start charging",
         description:
-          "The driver of an arrived booking starts charging: the charger is sent a remote start with the booking's idTag. The answer is the session: `starting` until the charger reports StartTransaction (then `charging`, pushed as `session:update`), or `failed` with a reason and copy to show, after which starting again retries. A charger that refuses because a stale transaction is open is soft-reset and the start retried once. With `startAt` in the future the session is `scheduled` and the remote start is sent then. Starting while a start is pending or a session runs returns it unchanged.",
+          "The driver of an arrived booking starts charging: the charger is sent a remote start with the booking's idTag. The answer is the session: `starting` until the charger reports StartTransaction (then `charging`, pushed as `session:update`), or `failed` with a reason and copy to show, after which starting again retries. A charger that refuses because a stale transaction is open is soft-reset and the start retried once. Before the slot starts (the driver plugged in early), or with `startAt` in the future, the session is `scheduled` and the remote start is sent at the slot start (or `startAt`); waiting is never billed. Starting while a start is pending or a session runs returns it unchanged. 409 `payment-pending` until the booking is paid.",
         tags: ["sessions"],
         params: bookingParams,
         body: startBody,

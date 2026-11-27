@@ -307,7 +307,12 @@ describe("PATCH /hosts/chargers/:id", () => {
     expect(bare.statusCode).toBe(409);
     expect(
       bare.json<{ reasons: { code: string }[] }>().reasons.map((reason) => reason.code),
-    ).toEqual(["no-availability"]);
+    ).toEqual(["tax-details-missing", "no-availability"]);
+    // Tax details come first: platform reporting needs them before a listing goes live.
+    await h.database.db
+      .update(hosts)
+      .set({ taxDetailsComplete: true })
+      .where(eq(hosts.id, aoife?.id ?? ""));
 
     const noPrice = await call("PATCH", `/hosts/chargers/${chargerId}`, host, { availability });
     expect(noPrice.statusCode).toBe(422);
@@ -388,7 +393,7 @@ describe("PATCH /hosts/chargers/:id", () => {
     expect(response.statusCode).toBe(409);
     expect(
       response.json<{ reasons: { code: string }[] }>().reasons.map((reason) => reason.code),
-    ).toEqual(["firmware-too-old", "payouts-not-enabled"]);
+    ).toEqual(["firmware-too-old", "payouts-not-enabled", "tax-details-missing"]);
   });
 
   it("does not let another host change your charger", async () => {

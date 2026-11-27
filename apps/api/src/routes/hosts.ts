@@ -1,9 +1,11 @@
 import { type Executor, hashChargerSecret } from "@nd/db";
 import {
   chargerStatusSchema,
+  chargeSplit,
   connectorTypeSchema,
   currencyForCountry,
   currencySchema,
+  type FeeSettings,
   hostCountrySchema,
   hostPayoutStatusSchema,
 } from "@nd/domain";
@@ -153,6 +155,13 @@ const hostChargerSchema = z
     timezone: z.string(),
     acceptingBookings: z.boolean(),
     pricePerHourCents: z.number().int().nullable(),
+    netPerHourCents: z
+      .number()
+      .int()
+      .nullable()
+      .describe(
+        "What the host receives for an hour's booking after the card fee passed on to them (and any platform fee); longer bookings spread the card fee's fixed part",
+      ),
     currency: currencySchema,
     kwhCap: z.number().nullable(),
     instantBook: z.boolean(),
@@ -186,7 +195,7 @@ async function ownedCharger(db: Executor, userId: string, chargerId: string, loc
   return charger;
 }
 
-async function hostChargerView(db: Executor, chargerId: string) {
+async function hostChargerView(db: Executor, chargerId: string, fees: FeeSettings) {
   const [row, rules] = await Promise.all([
     findHostChargerView(db, chargerId),
     rulesOf(db, chargerId),
@@ -207,6 +216,8 @@ async function hostChargerView(db: Executor, chargerId: string) {
     timezone: row.timezone,
     acceptingBookings: row.acceptingBookings,
     pricePerHourCents: first?.pricePerHourCents ?? null,
+    netPerHourCents:
+      first === undefined ? null : chargeSplit(first.pricePerHourCents, fees).hostNetCents,
     currency: first?.currency ?? row.currency,
     kwhCap: first?.kwhCap ?? null,
     instantBook: first?.instantBook ?? false,
@@ -224,6 +235,7 @@ async function hostChargerView(db: Executor, chargerId: string) {
       status: row.status,
       firmware: row.firmware,
       payoutStatus: row.payoutStatus,
+      taxDetailsComplete: row.taxDetailsComplete,
       availabilityCount: rules.length,
     }),
   };
@@ -409,7 +421,7 @@ export function registerHostRoutes(app: FastifyInstance, deps: AppDeps): void {
       schema: {
         summary: "Set a charger's price, availability and listing",
         description:
-          "Changes only the fields sent. `availability` replaces every window; price, kWh cap and instant book apply to every window. Publishing (`acceptingBookings: true`) needs the charger online on firmware 5.794 or later, payouts enabled and at least one window, otherwise 409 lists what is missing.",
+          "Changes only the fields sent. `availability` replaces every window; price, kWh cap and instant book apply to every window. Publishing (`acceptingBookings: true`) needs the charger online on firmware 5.794 or later, payouts enabled, tax details given and at least one window, otherwise 409 lists what is missing.",
         tags: ["hosts"],
         params: chargerParams,
         body: patchChargerBody,
@@ -471,6 +483,7 @@ export function registerHostRoutes(app: FastifyInstance, deps: AppDeps): void {
             status: charger.status,
             firmware: charger.firmware,
             payoutStatus: charger.payoutStatus,
+            taxDetailsComplete: charger.taxDetailsComplete,
             availabilityCount,
           });
           if (blockers.length > 0) {
@@ -502,7 +515,7 @@ export function registerHostRoutes(app: FastifyInstance, deps: AppDeps): void {
           await updateHostSettings(tx, charger.hostId, settings);
         }
       });
-      return hostChargerView(db, chargerId);
+      return hostChargerView(db, chargerId, config.fees);
     },
   );
 }

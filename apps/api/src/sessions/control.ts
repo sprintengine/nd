@@ -78,11 +78,19 @@ const arrivalOf = (distanceM: number | null, arrivedAt: Date | null): Arrival =>
   nearCharger: distanceM === null ? null : distanceM <= ARRIVAL_RADIUS_M,
 });
 
+const notPaid = () =>
+  new HttpProblem(
+    409,
+    "payment-pending",
+    "This booking is not paid yet",
+    "Charging is unlocked once the payment has gone through. Try again in a minute.",
+  );
+
 /**
- * The driver says they have arrived ("I'm here"), from 15 minutes before the
- * slot until it ends: a confirmed booking becomes arrived. A position, when
- * given, is compared with the charger's and the distance recorded, never
- * enforced. Arriving again changes nothing.
+ * The driver says they have arrived ("I'm here"), from a few hours before
+ * the slot (4 by default) until it ends: a confirmed, paid booking becomes
+ * arrived. A position, when given, is compared with the charger's and the
+ * distance recorded, never enforced. Arriving again changes nothing.
  */
 export async function arrive(
   services: SessionServices,
@@ -90,21 +98,25 @@ export async function arrive(
   bookingId: string,
   position: { lat: number; lng: number } | undefined,
 ): Promise<Arrival> {
-  const { booking, charger } = await driverContext(services, userId, bookingId);
+  const { booking, charger, paymentStatus } = await driverContext(services, userId, bookingId);
   if (booking.status === "arrived" || booking.status === "active") {
     return arrivalOf(booking.arrivalDistanceM, booking.arrivedAt);
   }
   if (booking.status !== "confirmed") {
     throw new HttpProblem(409, "cannot-arrive", "This booking is not waiting for you");
   }
+  if (paymentStatus !== "paid") throw notPaid();
   const now = services.clock.now();
-  const timing = arrivalTiming(booking.slot, now);
+  const lead = services.timings.arrivalLeadMinutes;
+  const timing = arrivalTiming(booking.slot, now, lead);
   if (timing !== "open") {
     throw new HttpProblem(
       409,
       timing === "early" ? "too-early" : "slot-ended",
       timing === "early" ? "It is too early to arrive" : "This booking has ended",
-      timing === "early" ? "You can check in from 15 minutes before your slot starts." : undefined,
+      timing === "early"
+        ? `You can check in from ${String(lead)} minutes before your slot starts.`
+        : undefined,
     );
   }
   const distanceM =
@@ -244,10 +256,13 @@ async function startNow(
 }
 
 /**
- * The driver starts charging. With `startAt` in the future (inside the slot)
- * the plug-in is recorded and a job sends the remote start then; otherwise it
- * is sent now. Starting while a start is pending or a session is running
- * changes nothing; after a failed start it tries again.
+ * The driver starts charging. Before the slot starts (the driver plugged in
+ * early) the start is scheduled for the slot start; with `startAt` in the
+ * future (inside the slot) it is scheduled then. Either way the plug-in is
+ * recorded and a job sends the remote start; waiting is never billed.
+ * Otherwise it is sent now. Starting while a start is pending or a session is
+ * running changes nothing; after a failed start it tries again. Only a paid
+ * booking can charge.
  */
 export async function startCharging(
   services: SessionServices,
@@ -259,6 +274,7 @@ export async function startCharging(
   const { booking, session } = context;
   if (session !== null && isOpenSession(session.status)) return;
   if (booking.status === "active" || scheduledStartPending(context)) return;
+  if (context.paymentStatus !== "paid") throw notPaid();
   if (booking.status !== "arrived") {
     throw new HttpProblem(
       409,
@@ -281,27 +297,22 @@ export async function startCharging(
         problem,
       );
     }
-    if (startAt.getTime() > now.getTime()) {
-      await setScheduledStart(services.db, bookingId, {
-        scheduledStartAt: startAt,
-        pluggedInAt: now,
-      });
-      await services.jobs.send(
-        remoteStartJob,
-        { bookingId },
-        { startAfter: startAt, singletonKey: `${bookingId}-scheduled` },
-      );
-      services.realtime.sessionChanged(bookingId);
-      return;
-    }
   }
-  if (now.getTime() < booking.slot.start.getTime()) {
-    throw new HttpProblem(
-      409,
-      "slot-not-started",
-      "Your slot has not started yet",
-      `Charging can start from ${booking.slot.start.toISOString()}, or choose a start time.`,
+  // Plugged in before the slot: charging starts when it does.
+  const scheduleAt =
+    startAt ?? (now.getTime() < booking.slot.start.getTime() ? booking.slot.start : undefined);
+  if (scheduleAt !== undefined && scheduleAt.getTime() > now.getTime()) {
+    await setScheduledStart(services.db, bookingId, {
+      scheduledStartAt: scheduleAt,
+      pluggedInAt: now,
+    });
+    await services.jobs.send(
+      remoteStartJob,
+      { bookingId },
+      { startAfter: scheduleAt, singletonKey: `${bookingId}-scheduled` },
     );
+    services.realtime.sessionChanged(bookingId);
+    return;
   }
   await startNow(services, context, { resetAllowed: true, retryUnanswered: false });
 }

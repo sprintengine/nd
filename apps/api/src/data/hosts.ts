@@ -114,6 +114,7 @@ export async function findOwnedCharger(
       acceptingBookings: chargers.acceptingBookings,
       hostId: hosts.id,
       payoutStatus: hosts.payoutStatus,
+      taxDetailsComplete: hosts.taxDetailsComplete,
       currency: hosts.currency,
     })
     .from(chargers)
@@ -223,6 +224,7 @@ export async function findHostChargerView(db: Executor, chargerId: string) {
       timezone: chargers.timezone,
       acceptingBookings: chargers.acceptingBookings,
       payoutStatus: hosts.payoutStatus,
+      taxDetailsComplete: hosts.taxDetailsComplete,
       currency: hosts.currency,
       maxSessionsPerDay: hosts.maxSessionsPerDay,
       nightRateStart: hosts.nightRateStart,
